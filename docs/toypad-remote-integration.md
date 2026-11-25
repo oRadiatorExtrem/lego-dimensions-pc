@@ -4,7 +4,9 @@ Documento de trabalho. Objetivo: correr o **Toy Pad Remote** (servidor web + web
 **dentro do port**, arrancado automaticamente com o jogo quando o toggle do launcher está ligado —
 tal como já acontece no fork de Cemu — e manter **um único núcleo** compilado pelas duas frentes.
 
-Estado: mapeamento feito a partir do código (sem alterações de comportamento).
+Estado: **F0 concluído** — núcleo em `oRadiatorExtrem/toypad-remote-core` (privado), commit `6d0fc8f`,
+sincronizado para o Cemu e verificado a correr (`GET /api/state` = 200 dentro do `Cemu_release.exe`).
+Fases F1+ por começar. Mapeamento feito a partir do código dos dois lados.
 
 ---
 
@@ -193,7 +195,7 @@ Não é um executável à parte: é **um par de ficheiros de código** compilado
 
 ### 4.0 Distribuição do núcleo (decidido)
 
-Repositório **próprio**, `toypad-remote-core`, copiado para cada projeto por um script de
+Repositório **próprio** (`github.com/oRadiatorExtrem/toypad-remote-core`, privado por agora), copiado para cada projeto por um script de
 sincronização (o mesmo papel de um `git subtree`, mais simples de ler num PR). **Sem submodule:**
 complica a vida a quem contribui e os mantenedores do port dificilmente aceitam uma dependência
 externa. O commit sincronizado fica registado num ficheiro **`VERSION`** (hash + data) em cada host,
@@ -362,7 +364,7 @@ o listener 9191 e o Toy Pad físico. No Cemu: `LoadFigure`, `RemoveFigure`, `Mov
 
 | Fase | Entrega | Ficheiros | Verificação |
 |---|---|---|---|
-| **F0** | Núcleo em repo próprio + `VERSION` + script de sincronização, interface de host, site **embutido** (`web_assets.h`), compila nos dois lados, sem mudar comportamento | `toypad-remote-core/*`, `web_embed.py`, adaptador Cemu | Cemu continua igual; `GET /api/state` responde |
+| **F0** ✅ | Núcleo em repo próprio + `VERSION.txt` + `sync.py`, interface de host, site **embutido**, compila nos dois lados | `toypad-remote-core/*`, `web_embed.py`, adaptador Cemu | **feito**: 37 testes verdes no núcleo; `Cemu_release.exe` responde 200 em `/api/state` |
 | **F1** | Port: espelho só de leitura (posições + LEDs no telemóvel) **+ junção SSE a 50 ms desde já** + `NotifyPortalChanged()` único (`X-TPR`/`Origin` já ativos) | `hle_toypad.h/.cpp` (accessors), `hle_toypadremote.cpp` | telemóvel vê as 3 figuras e as cores ao vivo, e quando o app/portal.json mexem no pad |
 | **F2** | Port: escrita (place/remove/move/zone) com o intervalo de 500 ms | adaptador usa `LoadTag`/`RemoveIndex`/`MoveIndex` + `InjectToypadPacket` | colocar/tirar do telemóvel funciona no jogo, como no Cemu |
 | **F3** | **Launcher: toggle + auto-start + `launcher.ini` + aviso "visível na rede local" + coexistência** | `tools/dist/launcher.cpp`, `main.cpp` | liga o toggle, arranca o jogo, servidor no ar — **sem isto ninguém usa o resto** |
