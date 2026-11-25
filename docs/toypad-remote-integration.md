@@ -25,7 +25,10 @@ Cemu, sem o projeto distribuir imagens.
 □○△/R2, zonas ←↑→, ciclo ↓/R1/L1 e ✕ = mover para a zona que o jogo pisca; selector
 **exclusivo** de portal no launcher (Telemóvel / Na tela / Nenhum).
 
-Falta F7 (endurecimento) e F8.
+**F7** (núcleo) concluído: gzip nos estáticos (59 580 → 17 057 bytes), tecto de 6 streams SSE
+com pool de 12 threads (uma aba pendurada não deixa o telemóvel à espera), 63 testes estáveis.
+
+Falta: instalar o núcleo novo no port (próxima build) e F8 (per-player shortcuts no Cemu).
 
 ---
 
