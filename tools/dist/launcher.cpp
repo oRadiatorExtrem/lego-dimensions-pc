@@ -685,12 +685,48 @@ void CheckUpdate(bool manual = false) {
     }
 }
 
+// Issue #21: as conquistas "resetavam" depois de uma actualizacao. A causa exacta nao esta no
+// launcher (o reset que aqui existe e' um botao manual), mas o dado e' pequeno e precioso: antes de
+// actualizar, guarda-se uma copia de cada trophies.dat que exista. Se algo se perder, esta em
+// assets	rophyackup\ e basta copiar de volta.
+void BackupTrophies(const wchar_t* why) {
+    const fs::path paths[] = {
+        g_root / L"assets" / L"trophy" / L"trophies.dat",
+        g_root / L"assets" / L"savedata0" / L"trophies.dat",
+        g_root / L"assets" / g_saves_value / L"trophies.dat",
+    };
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wchar_t stamp[32];
+    swprintf(stamp, 32, L"%04u%02u%02u_%02u%02u%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    const fs::path dir = g_root / L"assets" / L"trophy" / L"backup";
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    int copied = 0;
+    for (int i = 0; i < 3; ++i) {
+        std::error_code stat_ec;
+        if (!fs::is_regular_file(paths[i], stat_ec)) {
+            continue;
+        }
+        const std::wstring name = std::wstring(L"trophies_") + stamp + L"_" + std::to_wstring(i) + L".dat";
+        std::error_code copy_ec;
+        if (fs::copy_file(paths[i], dir / name, fs::copy_options::overwrite_existing, copy_ec)) {
+            ++copied;
+        }
+    }
+    if (copied) {
+        AppendLog(std::wstring(ui::T(L"Conquistas guardadas (", L"Achievements backed up (")) + why + L"): " +
+                  std::to_wstring(copied) + ui::T(L" ficheiro(s) em assets\trophy\backup.", L" file(s) in assets\trophy\backup."));
+    }
+}
+
 void ApplyUpdate() {
     if (GameRunning()) {
         MessageBoxW(g_main, ui::T(L"Feche o jogo antes de atualizar.", L"Close the game before updating."), L"LEGO Dimensions PC", MB_ICONINFORMATION);
         return;
     }
     SaveSettings();
+    BackupTrophies(ui::T(L"antes de atualizar", L"before updating"));
     if (RunPython(L"atualizar.py", L" --apply", Task::kUpdate)) {
         g_step = ui::T(L"Atualizando...", L"Updating...");
         UpdateStatus();
@@ -4577,6 +4613,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     WakeMpServer(); // 4.0: com o multiplayer ligado, acorda o servidor enquanto voce navega no launcher
     EnsureTrophyIcons(); // 3.0
     ShowWindow(g_main, show);
+    if (GetEnvironmentVariableW(L"LD_LAUNCHER_BACKUP_TROPHIES", nullptr, 0)) { // teste do backup das conquistas
+        BackupTrophies(L"teste");
+        DestroyWindow(g_main);
+        CoUninitialize();
+        return 0;
+    }
     if (GetEnvironmentVariableW(L"LD_LAUNCHER_ABRIR_MP", nullptr, 0)) OpenMpDialog(); // teste da janela da sala
     // teste: entra em jogo sozinho (com LD_LAUNCHER_SEM_JOGO so registra a linha de comando)
     if (GetEnvironmentVariableW(L"LD_LAUNCHER_PLAY", nullptr, 0)) {
