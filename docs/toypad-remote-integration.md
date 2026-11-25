@@ -12,7 +12,11 @@ Estado: **F0, F1 e F2 concluídos.**
   verificadas no jogo real a partir do telemóvel (branch `feat/toypad-remote-f1-f2`, commit `5729793`).
   Segurança testada no binário: POST sem `X-TPR` → 403, `Origin` externo → 403, `OPTIONS` → 403.
 
-Falta F3 (launcher), F4 (biblioteca/upgrades), F5-F8.
+**F3** concluído também: toggle no launcher, janela de porta/PIN, e o núcleo anuncia
+`http://<nome-da-maquina>:8090` — com Tailscale é exactamente o mesmo link do Cemu
+(`http://legion5-15arh05:8090`), com ou sem maiúsculas no `Origin`.
+
+Falta F4 (biblioteca/upgrades), F5-F8.
 
 ---
 
