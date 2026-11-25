@@ -21,7 +21,11 @@ nossos próprios dumps — só números), `catalog_data.h` (nomes e mundos, do L
 MIT) e ícones servidos de `assets/toypad_remote/img` com `/images.js` gerado. O mesmo ícone do
 Cemu, sem o projeto distribuir imagens.
 
-Falta F5 (loadouts por botão), F6 (atalhos no comando), F7 (endurecimento) e F8.
+**F5/F6** concluídos: atalhos no comando por jogador (modificador TouchPad) com loadouts
+□○△/R2, zonas ←↑→, ciclo ↓/R1/L1 e ✕ = mover para a zona que o jogo pisca; selector
+**exclusivo** de portal no launcher (Telemóvel / Na tela / Nenhum).
+
+Falta F7 (endurecimento) e F8.
 
 ---
 
