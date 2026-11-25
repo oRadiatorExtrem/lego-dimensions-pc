@@ -512,7 +512,7 @@ void InjectToypadPacket(const toypad::Packet& packet) {
 
 void TakeToypadExternalControl() {
     if (!g_external_control.exchange(true)) {
-        log::Tagged("PORTAL", "LegoToypad app active on portal");
+        log::Tagged("PORTAL", "external control active on portal (Toy Pad Remote or LegoToypad app)");
     }
 }
 

@@ -126,6 +126,33 @@ struct LedState {
 LedState g_led[kPadCount];
 u8 g_led_counter = 0; // muda a cada estado novo (o app so redesenha quando muda)
 
+// Servidores externos (Toy Pad Remote). Ambos sao chamados sempre FORA do g_mutex: o callback pode
+// trancar o que quiser (o servidor tranca o estado dele e pede-nos um Snapshot), e chama-lo com o
+// g_mutex na mao inverteria a ordem de locks documentada no nucleo.
+PortalChangeCallback g_change_callback = nullptr;
+CommandObserver g_command_observer = nullptr;
+
+void NotifyPortalChanged() {
+    if (const PortalChangeCallback callback = g_change_callback) {
+        callback();
+    }
+}
+
+// Adiado: declarar ANTES do lock_guard para correr DEPOIS de o lock ser largado (destruicao inversa).
+struct DeferredNotify {
+    bool portal = false;
+    bool has_command = false;
+    Packet command{};
+    ~DeferredNotify() {
+        if (has_command && g_command_observer) {
+            g_command_observer(command);
+        }
+        if (portal) {
+            NotifyPortalChanged();
+        }
+    }
+};
+
 u8 LedRandomByte() {
     static u32 state = 0x2545F491u; // independente do gerador do desafio do portal
     state ^= state << 13;
@@ -414,6 +441,7 @@ u32 SessionNumber() {
 }
 
 std::optional<Packet> PlaceFigure(int pad, const Uid& uid, u32 character_id) {
+    DeferredNotify notify;
     std::lock_guard lock(g_mutex);
     if (pad < 1 || pad > kPadCount) {
         return std::nullopt;
@@ -430,6 +458,7 @@ std::optional<Packet> PlaceFigure(int pad, const Uid& uid, u32 character_id) {
     figure.path.clear();
     ++g_stats.figures_placed;
     SavePortalStateLocked();
+    notify.portal = true;
     return FigureEvent(pad, pad, false, uid);
 }
 
@@ -445,6 +474,7 @@ u32 TagCharacterId(const TagData& tag) {
 }
 
 std::optional<Packet> LoadTag(int pad, int index, const TagData& tag, const std::string& path, u32* character_id) {
+    DeferredNotify notify;
     std::lock_guard lock(g_mutex);
     if (pad < 1 || pad > kPadCount || index < 0 || index >= kSlotCount) {
         return std::nullopt;
@@ -493,10 +523,12 @@ std::optional<Packet> LoadTag(int pad, int index, const TagData& tag, const std:
     }
     ++g_stats.figures_placed;
     SavePortalStateLocked();
+    notify.portal = true;
     return FigureEvent(pad, index, false, figure.uid);
 }
 
 std::optional<Packet> RemoveIndex(int index) {
+    DeferredNotify notify;
     std::lock_guard lock(g_mutex);
     if (index < 0 || index >= kSlotCount || !g_figures[index].present) {
         return std::nullopt;
@@ -505,10 +537,12 @@ std::optional<Packet> RemoveIndex(int index) {
     figure.present = false;
     ++g_stats.figures_removed;
     SavePortalStateLocked();
+    notify.portal = true;
     return FigureEvent(figure.pad, index, true, figure.uid);
 }
 
 std::vector<Packet> MoveIndex(int new_pad, int new_index, int old_index) {
+    DeferredNotify notify;
     std::lock_guard lock(g_mutex);
     std::vector<Packet> events;
     if (new_pad < 1 || new_pad > kPadCount || new_index < 0 || new_index >= kSlotCount || old_index < 0 || old_index >= kSlotCount ||
@@ -525,6 +559,7 @@ std::vector<Packet> MoveIndex(int new_pad, int new_index, int old_index) {
     g_figures[new_index] = moved;
     events.push_back(FigureEvent(new_pad, new_index, false, moved.uid));
     SavePortalStateLocked();
+    notify.portal = true;
     return events;
 }
 
@@ -565,6 +600,7 @@ void LedSnapshot(u8 out[kLedSnapshotBytes]) {
 }
 
 std::optional<Packet> RemoveFigure(int pad) {
+    DeferredNotify notify;
     std::lock_guard lock(g_mutex);
     if (pad < 1 || pad > kPadCount || !g_figures[pad].present) {
         return std::nullopt;
@@ -573,10 +609,12 @@ std::optional<Packet> RemoveFigure(int pad) {
     figure.present = false;
     ++g_stats.figures_removed;
     SavePortalStateLocked();
+    notify.portal = true;
     return FigureEvent(figure.pad, pad, true, figure.uid);
 }
 
 std::optional<Packet> HandleCommand(const u8* command, u32 length) {
+    DeferredNotify notify;
     if (!command || length < 5 || command[0] != 0x55) {
         return std::nullopt;
     }
@@ -696,12 +734,94 @@ std::optional<Packet> HandleCommand(const u8* command, u32 length) {
                     checksum_ok ? "" : " (invalid checksum)", Hex(command, 3u + len).c_str(),
                     Hex(reply.data(), 3u + reply[1]).c_str());
     }
+    if (g_command_observer) {
+        // entrega fora do lock (o observador tranca o estado dele): o DeferredNotify corre depois
+        Packet observed{};
+        std::memcpy(observed.data(), command, std::min<size_t>(32u, length));
+        notify.command = observed;
+        notify.has_command = true;
+    }
     return reply;
 }
 
 Stats GetStats() {
     std::lock_guard lock(g_mutex);
     return g_stats;
+}
+
+// ---- acesso para servidores externos -------------------------------------------------
+
+std::array<SlotInfo, kSlotCount> Slots() {
+    std::lock_guard lock(g_mutex);
+    std::array<SlotInfo, kSlotCount> out{};
+    for (int i = 0; i < kSlotCount; ++i) {
+        const Figure& figure = g_figures[i];
+        out[i].present = figure.present;
+        out[i].pad = figure.pad;
+        out[i].character_id = figure.id;
+        out[i].path = figure.path; // o nome que o utilizador ve e pode renomear
+    }
+    return out; // copia: nada e formatado com o lock na mao
+}
+
+std::array<LedInfo, kPadCount> Leds() {
+    std::lock_guard lock(g_mutex);
+    std::array<LedInfo, kPadCount> out{};
+    for (int zone = 0; zone < kPadCount; ++zone) {
+        const LedState& led = g_led[zone];
+        out[zone].mode = led.mode;
+        out[zone].r = led.r;
+        out[zone].g = led.g;
+        out[zone].b = led.b;
+        out[zone].on = led.on;
+        out[zone].off = led.off;
+        out[zone].count = led.count;
+        out[zone].speed = led.speed;
+        out[zone].counter = g_led_counter; // so muda quando alguma zona muda
+    }
+    return out;
+}
+
+std::vector<Packet> SwapFigures(int pad_a, int index_a, int pad_b, int index_b) {
+    DeferredNotify notify;
+    std::lock_guard lock(g_mutex);
+    std::vector<Packet> events;
+    if (pad_a < 1 || pad_a > kPadCount || pad_b < 1 || pad_b > kPadCount || index_a < 0 || index_a >= kSlotCount ||
+        index_b < 0 || index_b >= kSlotCount || index_a == index_b) {
+        return events;
+    }
+    Figure& a = g_figures[index_a];
+    Figure& b = g_figures[index_b];
+    if (!a.present && !b.present) {
+        return events;
+    }
+    // o que o jogo veria num portal de verdade: as duas saem, as duas voltam trocadas
+    if (a.present) {
+        events.push_back(FigureEvent(pad_a, index_a, true, a.uid));
+    }
+    if (b.present) {
+        events.push_back(FigureEvent(pad_b, index_b, true, b.uid));
+    }
+    std::swap(a, b);
+    if (a.present) {
+        a.pad = pad_a;
+        events.push_back(FigureEvent(pad_a, index_a, false, a.uid));
+    }
+    if (b.present) {
+        b.pad = pad_b;
+        events.push_back(FigureEvent(pad_b, index_b, false, b.uid));
+    }
+    SavePortalStateLocked();
+    notify.portal = true;
+    return events;
+}
+
+void SetPortalChangeCallback(PortalChangeCallback callback) {
+    g_change_callback = callback;
+}
+
+void SetCommandObserver(CommandObserver observer) {
+    g_command_observer = observer;
 }
 
 void SetPortalFilePath(const std::filesystem::path& path) {

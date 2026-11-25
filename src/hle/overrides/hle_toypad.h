@@ -65,6 +65,40 @@ u32 TagCharacterId(const TagData& tag);
 constexpr u32 kLedSnapshotBytes = 4 + 3 * 12;
 void LedSnapshot(u8 out[kLedSnapshotBytes]);
 
+// ---- acesso para servidores externos (Toy Pad Remote) ------------------------------
+// Uma posicao do portal, como o servidor a ve. `path` e o arquivo da figura (vazio se a
+// figura nao veio de um ficheiro); e o nome que o utilizador ve.
+struct SlotInfo {
+    bool present = false;
+    int pad = 0;
+    u32 character_id = 0;
+    std::string path;
+};
+std::array<SlotInfo, kSlotCount> Slots();
+
+// Estado de um LED de zona. `counter` so muda quando a zona muda (o servidor usa-o para
+// reiniciar animacoes no cliente).
+struct LedInfo {
+    u8 mode = 0; // 0 apagado, 1 cor fixa, 2 piscando, 3 fade
+    u8 r = 0, g = 0, b = 0;
+    u8 on = 0, off = 0, count = 0, speed = 0;
+    u8 counter = 0;
+};
+std::array<LedInfo, kPadCount> Leds();
+
+// Troca duas figuras de posicao, como se ambas fossem levantadas e pousadas no outro sitio.
+// Devolve os eventos a entregar ao jogo, na ordem: removida A, removida B, colocada B, colocada A.
+std::vector<Packet> SwapFigures(int pad_a, int index_a, int pad_b, int index_b);
+
+// Chamado sempre que o portal muda (figura posta/tirada/movida, por qualquer via).
+// A notificacao e sempre feita FORA do lock interno: o callback pode trancar a vontade.
+using PortalChangeCallback = void (*)();
+void SetPortalChangeCallback(PortalChangeCallback callback);
+
+// Observa cada comando de 32 bytes que o jogo envia ao portal (o servidor externo usa para os LEDs).
+using CommandObserver = void (*)(const Packet& packet);
+void SetCommandObserver(CommandObserver observer);
+
 // Monta a tag de um personagem (id < 1000) ou veiculo/gadget (id >= 1000).
 TagData BuildTag(const Uid& uid, u32 character_id);
 // Chave TEA derivada do UID, que cifra o id nas paginas 0x24-0x25.

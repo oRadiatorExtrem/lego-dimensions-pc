@@ -87,6 +87,9 @@ add_executable(lego_dimensions
     src/hle/overrides/hle_gnm.cpp
     src/hle/overrides/hle_toypad.cpp
     src/hle/overrides/hle_toypad_listener.cpp
+    src/hle/overrides/hle_toypadremote.cpp
+    # nucleo partilhado do Toy Pad Remote (o mesmo que o fork de Cemu usa; copiado por sync.py)
+    third_party/toypad-remote-core/ToypadRemoteCore.cpp
     src/hle/overrides/hle_toypad_hid.cpp
     src/hle/overrides/hle_pad.cpp
     src/hle/overrides/hle_pad_sdl.cpp
@@ -102,6 +105,7 @@ add_executable(lego_dimensions
     ${HLE_GENERATED_SOURCES}
 )
 target_include_directories(lego_dimensions PRIVATE src src/hle/generated)
+target_include_directories(lego_dimensions PRIVATE third_party/toypad-remote-core)
 # 1.9.1: AMD FSR 2 / 3 / 4 (FFX API do SDK FSR 2.4.0): so os headers aqui; as DLLs assinadas vao ao lado do exe
 target_include_directories(lego_dimensions PRIVATE externals/fidelityfx-sdk/include externals/xess-sdk/include)
 add_custom_command(TARGET lego_dimensions POST_BUILD

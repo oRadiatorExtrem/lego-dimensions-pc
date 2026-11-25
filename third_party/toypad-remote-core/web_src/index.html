@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101218">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<title>Toy Pad</title>
+<style>
+:root{--bg:#101218;--card:#1a1d26;--card2:#232734;--fg:#eef0f6;--dim:#8a90a2;--acc:#ffcc33;--bad:#ff5c5c;--ok:#4cd27a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+body{display:flex;flex-direction:column;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom);user-select:none;-webkit-user-select:none}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 2px}
+h1{font-size:18px;margin:0;letter-spacing:.5px}
+#status{font-size:12px;padding:4px 10px;border-radius:99px;background:var(--card2);color:var(--dim)}
+#status.ok{color:var(--ok)}#status.bad{color:var(--bad)}
+#pad{display:grid;grid-template-columns:1fr .9fr 1fr;gap:10px;padding:12px;border-radius:22px;background:#0b0c10;box-shadow:inset 0 0 0 2px #262a36}
+.zone{--led:0,0,0;border-radius:18px;padding:8px;display:grid;gap:8px;background:rgba(var(--led),.22);box-shadow:0 0 0 2px rgba(var(--led),.9),0 0 26px rgba(var(--led),.55);transition:background .25s,box-shadow .25s}
+.side{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.side .top{grid-column:1/3}
+.center{align-content:center}
+.slot{min-height:clamp(74px,14vh,130px);border-radius:12px;background:rgba(16,18,24,.82);border:2px dashed #3a4050;display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;font-size:12px;font-weight:600;word-break:break-word;cursor:pointer;transition:transform .08s}
+.center .slot{min-height:clamp(110px,22vh,200px);font-size:13px}
+.slot:active{transform:scale(.96)}
+.slot.full{border:2px solid rgba(255,255,255,.18);background:rgba(16,18,24,.92)}
+.slot.empty{color:var(--dim);font-weight:400;font-size:22px}
+.slot.sel{border-color:var(--acc);box-shadow:0 0 0 2px var(--acc)}
+.slot{touch-action:none}
+.slot.dragging{opacity:.35}
+.slot.drop,.zone.drop{outline:3px solid var(--acc);outline-offset:2px}
+.ghost{position:fixed;left:0;top:0;z-index:30;pointer-events:none;padding:14px 16px;border-radius:12px;background:var(--acc);color:#111;font-weight:700;font-size:13px;box-shadow:0 8px 24px #000a;white-space:nowrap}
+.ghost.out{background:var(--bad);color:#fff}
+.slot.pick{position:relative}
+.slot.pick::after{content:"🎮";position:absolute;top:3px;right:5px;font-size:11px}
+h2{font-size:13px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px;margin:18px 2px 8px;display:flex;justify-content:space-between;align-items:center}
+h2 button{font-size:12px;padding:7px 10px;text-transform:none;letter-spacing:0}
+.lo{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.lo .go{flex:1;text-align:left;display:flex;gap:10px;align-items:center}
+.lo .k{display:inline-block;min-width:22px;text-align:center;border-radius:6px;background:#0b0c10;color:var(--acc);font-size:12px;font-weight:700;padding:2px 4px}
+.lo .sm{padding:11px 12px;color:var(--dim)}
+.help{color:var(--dim);font-size:12px;line-height:1.6;margin:16px 2px 24px}
+.help b{color:var(--fg)}
+#menu .zones{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
+#menu .zones button:disabled{opacity:.35}
+#hint{color:var(--dim);font-size:13px;text-align:center;margin:12px 0;min-height:18px}
+#hint b{color:var(--acc)}
+@keyframes flash{50%{background:rgba(var(--led),.05);box-shadow:0 0 0 2px rgba(var(--led),.2)}}
+@keyframes rainbow{0%{filter:hue-rotate(0)}100%{filter:hue-rotate(360deg)}}
+.zone.flash{animation:flash var(--d,.4s) steps(1) var(--n,6)}
+.zone.rand{--led:255,0,0;animation:rainbow 2.5s linear var(--n,2)}
+#sheet,#menu{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-radius:18px 18px 0 0;box-shadow:0 -10px 40px #000a;transform:translateY(105%);transition:transform .2s ease-out;z-index:10;padding:10px 12px calc(12px + env(safe-area-inset-bottom))}
+#sheet{top:12vh;display:flex;flex-direction:column}
+#sheet.open,#menu.open{transform:none}
+#shade{position:fixed;inset:0;background:#0008;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9}
+#shade.open{opacity:1;pointer-events:auto}
+.grab{width:40px;height:4px;border-radius:2px;background:#444a5a;margin:0 auto 10px}
+.tabs{display:flex;gap:6px;margin-bottom:8px}
+.tabs button{flex:1}
+button{font:inherit;color:var(--fg);background:var(--card2);border:0;border-radius:10px;padding:11px 12px;cursor:pointer}
+button.on{background:var(--acc);color:#111;font-weight:700}
+button.danger{color:var(--bad)}
+#q{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid #333847;border-radius:10px;padding:11px 12px;margin-bottom:8px;outline:none;user-select:text}
+#list{overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;margin:0 -4px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 8px;border-bottom:1px solid #262a36;cursor:pointer}
+.item:active{background:var(--card2)}
+.item small{color:var(--dim);font-size:12px;text-align:right}
+.item.used{opacity:.45}
+.slot{flex-direction:column}
+.slot .thumb{max-height:46%;max-width:90%;object-fit:contain;pointer-events:none}
+.item .li{width:36px;height:36px;object-fit:contain;flex:none}
+.item .nm{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.item .nm small{text-align:left}
+.item .ic{background:none;padding:8px 7px;font-size:17px;color:var(--dim)}
+.item .ic.star{color:var(--acc)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:4px 4px 8px;scrollbar-width:none}
+.chips button{flex:none;font-size:12px;padding:7px 11px;border-radius:99px}
+.chips button.on{background:var(--acc);color:#111;font-weight:700}
+.sub{color:var(--dim);font-size:12px;font-weight:600;padding:8px 8px 2px}
+.sec{color:var(--acc);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;padding:12px 8px 4px}
+.empty-msg{color:var(--dim);text-align:center;padding:30px 10px}
+#menu h3{margin:2px 4px 10px;font-size:16px}
+#menu .row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+#toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,40px);opacity:0;background:#000d;padding:10px 16px;border-radius:10px;font-size:13px;transition:.2s;z-index:20;pointer-events:none}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<header><h1>LEGO Dimensions · Toy Pad</h1><span id="status">a ligar…</span></header>
+
+<div id="pad">
+  <div class="zone side" data-pad="2">
+    <div class="slot top" data-slot="0"></div>
+    <div class="slot" data-slot="3"></div>
+    <div class="slot" data-slot="4"></div>
+  </div>
+  <div class="zone center" data-pad="1">
+    <div class="slot" data-slot="1"></div>
+  </div>
+  <div class="zone side" data-pad="3">
+    <div class="slot top" data-slot="2"></div>
+    <div class="slot" data-slot="5"></div>
+    <div class="slot" data-slot="6"></div>
+  </div>
+</div>
+<div id="hint">Toca num espaço para pôr uma figura</div>
+
+<h2>Loadouts <button id="loSave">+ Guardar pad atual</button></h2>
+<div id="loadouts"></div>
+
+<div class="help"><b>Comando</b> (segura <b>Home</b>):<br>
+◀ ▲ ▶ mover a figura 🎮 para Esquerda / Centro / Direita<br>
+▼ ou R / L escolher figura · A B X Y aplicar loadout 1 2 3 4</div>
+
+<div id="shade"></div>
+<div id="sheet">
+  <div class="grab"></div>
+  <div class="tabs"><button id="tMine" class="on">As minhas</button><button id="tNew">Criar nova</button></div>
+  <input id="q" type="search" placeholder="Procurar nome, mundo ou habilidade (ex: laser)…" autocomplete="off">
+  <div id="list"></div>
+</div>
+<div id="menu">
+  <div class="grab"></div>
+  <h3 id="mTitle"></h3>
+  <div class="zones"><button data-pad="2">◀ Esquerda</button><button data-pad="1">▲ Centro</button><button data-pad="3">Direita ▶</button></div>
+  <div class="row"><button id="mSwap">Trocar</button><button id="mMove">Mover</button><button id="mRemove" class="danger">Retirar</button></div>
+</div>
+<div id="toast"></div>
+
+<script src="catalog.js?v=1795546011062"></script>
+<script src="images.js?v=1795546011062" onerror="window.IMAGES={}"></script>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const C = window.CATALOG || { worlds: [], chars: [], vehicles: [] };
+const byId = new Map();
+for (const [id, name, w, ab] of C.chars) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: false });
+for (const [id, name, w, ab] of C.vehicles) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: true });
+
+let state = null, figures = [], target = null, moving = null, tab = "mine", worldFilter = null;
+
+// ---- api
+async function api(path, params) {
+  const r = await fetch(path + "?" + new URLSearchParams(params), { method: "POST" });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "erro " + r.status);
+  return j;
+}
+async function loadFigures() {
+  figures = await (await fetch("/api/figures")).json();
+  figures.sort((a, b) => label(a).localeCompare(label(b)));
+}
+// the file name is the figure's name (you can rename it); the catalog only tells its world
+const label = (f) => f.file.replace(/\.bin$/i, "");
+function slotLabel(s) {
+  if (!s) return "";
+  if (s.file) { const f = figures.find((x) => x.file === s.file); if (f) return label(f); }
+  return byId.get(s.id)?.name || s.file.replace(/\.bin$/i, "") || "#" + s.id;
+}
+
+let toastT;
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200);
+}
+const act = (p) => p.catch((e) => toast(e.message));
+
+// ---- LED colours (game values -> displayed colour, table from LD-ToyPad-Emulator, MIT)
+const LED_MAP = {"99420e":"ffffff","ff6e00":"ffff00","006e00":"00ff00","006e18":"00ffff","000018":"0000ff","ff0018":"ff00ff","f00016":"ff2de6","002007":"007575","4c2000":"757500","4c0007":"750075","3f1b05":"b0b0b0","4c2007":"757575","3f1b00":"b0b000","3f0000":"b00000","000005":"0000b0","001b00":"00b000","ff2700":"ffa200","3f0900":"b06f00","44000d":"d500ff","110003":"9300b0","000016":"0000ff","006700":"00ff00","ff1e00":"ffa200","f06716":"ffffff","003700":"00ff00","ff6e18":"ffffff"};
+function ledRgb([r, g, b]) {
+  const hex = [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+  const m = LED_MAP[hex];
+  if (m) return [0, 2, 4].map((i) => parseInt(m.substr(i, 2), 16));
+  // the pad LEDs are dim at low values: brighten for the screen while keeping the hue
+  const max = Math.max(r, g, b);
+  return max && max < 160 ? [r, g, b].map((v) => Math.round((v * 200) / max)) : [r, g, b];
+}
+const ledSeq = [0, 0, 0];
+function renderLeds(leds) {
+  leds.forEach((l, i) => {
+    const z = document.querySelector(`.zone[data-pad="${i + 1}"]`);
+    const [r, g, b] = ledRgb(l.c);
+    z.style.setProperty("--led", `${r},${g},${b}`);
+    if (l.s === ledSeq[i]) return;
+    ledSeq[i] = l.s;
+    z.classList.remove("flash", "rand"); void z.offsetWidth; // restart animation
+    z.style.transitionDuration = l.m === "f" ? Math.min(3, Math.max(0.05, l.p[0] * 0.03)) + "s" : "";
+    if (l.m === "F") {
+      // the game flashes a zone when it wants a figure there: buzz the phone so you look
+      navigator.vibrate?.([80, 60, 80]);
+      z.style.setProperty("--d", Math.max(0.1, (l.p[0] + l.p[1]) * 0.02) + "s");
+      z.style.setProperty("--n", l.p[2] >= 255 ? "infinite" : Math.max(1, l.p[2]));
+      z.classList.add("flash");
+    } else if (l.m === "r") {
+      z.style.setProperty("--n", l.p[1] >= 255 ? "infinite" : Math.max(1, l.p[1]));
+      z.classList.add("rand");
+    }
+  });
+}
+
+// ---- pad
+function render() {
+  if (!state) return;
+  document.querySelectorAll(".slot").forEach((el) => {
+    const s = state.slots[+el.dataset.slot];
+    el.className = el.className.replace(/\b(full|empty|sel|pick)\b/g, "").trim();
+    el.classList.add(s ? "full" : "empty");
+    if (moving !== null && +el.dataset.slot === moving) el.classList.add("sel");
+    if (s && state.sel === +el.dataset.slot) el.classList.add("pick");
+    const img = s && (window.IMAGES || {})[s.id];
+    el.textContent = "";
+    if (img) { const i = document.createElement("img"); i.src = img; i.className = "thumb"; i.alt = ""; el.append(i, document.createElement("br")); }
+    el.append(s ? slotLabel(s) : "+");
+  });
+  renderLeds(state.leds);
+  const st = $("#status");
+  st.textContent = state.awake ? "jogo ligado" : "à espera do jogo";
+  st.className = state.awake ? "ok" : "";
+  $("#hint").innerHTML = moving !== null ? "<b>Toca no espaço de destino</b> (ou no mesmo para cancelar)"
+    : state.slots.some(Boolean) ? "Arrasta uma figura para outro espaço · larga fora do pad para a retirar" : "Toca num espaço para pôr uma figura";
+}
+
+// ---- drag & drop: onto a spot (moves / swaps), onto a zone (first free spot), outside the pad (removes)
+let drag = null, suppressClick = false;
+function dropTarget(x, y) {
+  const t = document.elementFromPoint(x, y);
+  if (!t) return "out";
+  return t.closest(".slot") || t.closest(".zone") || (t.closest("#pad") ? null : "out");
+}
+let lastDrop = null;
+function markDrop(t) {
+  if (lastDrop && lastDrop !== "out") lastDrop.classList.remove("drop");
+  lastDrop = t;
+  if (t && t !== "out") t.classList.add("drop");
+  drag?.ghost?.classList.toggle("out", t === "out");
+}
+document.querySelectorAll(".slot").forEach((el) =>
+  el.addEventListener("pointerdown", (e) => {
+    const i = +el.dataset.slot;
+    if (!state?.slots[i] || moving !== null) return;
+    drag = { from: i, x: e.clientX, y: e.clientY, el, ghost: null, id: e.pointerId };
+  })
+);
+addEventListener("pointermove", (e) => {
+  if (!drag || e.pointerId !== drag.id) return;
+  if (!drag.ghost) {
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 10) return;
+    drag.ghost = document.createElement("div");
+    drag.ghost.className = "ghost"; drag.ghost.textContent = drag.el.textContent;
+    document.body.appendChild(drag.ghost); drag.el.classList.add("dragging");
+    navigator.vibrate?.(15);
+  }
+  drag.ghost.style.transform = `translate(${e.clientX}px,${e.clientY}px) translate(-50%,-130%)`;
+  markDrop(dropTarget(e.clientX, e.clientY));
+});
+function endDrag(e, cancel) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const d = drag; drag = null;
+  if (!d.ghost) return; // just a tap: the click handler deals with it
+  d.ghost.remove(); d.el.classList.remove("dragging"); markDrop(null);
+  suppressClick = true; setTimeout(() => (suppressClick = false), 150);
+  if (cancel) return;
+  const t = dropTarget(e.clientX, e.clientY);
+  if (t === "out") act(api("/api/remove", { slot: d.from }).then(() => toast("Retirada do pad")));
+  else if (t?.classList.contains("slot")) { const to = +t.dataset.slot; if (to !== d.from) act(api("/api/move", { from: d.from, to })); }
+  else if (t?.classList.contains("zone")) act(api("/api/zone", { slot: d.from, pad: t.dataset.pad }));
+}
+addEventListener("pointerup", (e) => endDrag(e, false));
+addEventListener("pointercancel", (e) => endDrag(e, true));
+
+document.querySelectorAll(".slot").forEach((el) =>
+  el.addEventListener("click", () => {
+    if (suppressClick) return;
+    const i = +el.dataset.slot;
+    if (moving !== null) {
+      const from = moving; moving = null; render();
+      if (from !== i) act(api("/api/move", { from, to: i }));
+      return;
+    }
+    target = i;
+    if (state?.slots[i]) openMenu(i); else openSheet();
+  })
+);
+
+// ---- slot menu
+const SLOT_PAD = [2, 1, 3, 2, 2, 3, 3];
+document.querySelectorAll("#menu .zones button").forEach((b) =>
+  b.addEventListener("click", () => { closeAll(); act(api("/api/zone", { slot: target, pad: b.dataset.pad })); })
+);
+function openMenu(i) {
+  $("#mTitle").textContent = slotLabel(state.slots[i]);
+  document.querySelectorAll("#menu .zones button").forEach((b) => (b.disabled = +b.dataset.pad === SLOT_PAD[i]));
+  $("#menu").classList.add("open"); $("#shade").classList.add("open");
+}
+$("#mSwap").onclick = () => { closeAll(); openSheet(); };
+$("#mMove").onclick = () => { moving = target; closeAll(); render(); };
+$("#mRemove").onclick = () => { closeAll(); act(api("/api/remove", { slot: target })); };
+
+// ---- library sheet
+function closeAll() {
+  $("#sheet").classList.remove("open"); $("#menu").classList.remove("open"); $("#shade").classList.remove("open");
+  $("#q").blur();
+}
+$("#shade").onclick = closeAll;
+async function openSheet() {
+  $("#q").value = "";
+  setTab(tab);
+  $("#sheet").classList.add("open"); $("#shade").classList.add("open");
+  try { await loadFigures(); } catch { toast("Não consegui ler as figuras"); }
+  if (!figures.length && tab === "mine") tab = "new", setTab(tab);
+  renderList();
+}
+function setTab(t) {
+  tab = t;
+  $("#tMine").classList.toggle("on", t === "mine");
+  $("#tNew").classList.toggle("on", t === "new");
+}
+$("#tMine").onclick = () => { setTab("mine"); renderList(); };
+$("#tNew").onclick = () => { setTab("new"); renderList(); };
+$("#q").oninput = () => renderList();
+
+const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+function renderList() {
+  const q = norm($("#q").value.trim());
+  const match = (...t) => !q || t.some((x) => x && norm(x).includes(q));
+  const list = $("#list"); list.textContent = "";
+  const add = (html, cls, fn) => {
+    const d = document.createElement("div"); d.className = cls; d.innerHTML = html;
+    if (fn) d.onclick = fn; list.appendChild(d); return d;
+  };
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+  if (tab === "mine") {
+    const onPad = new Set(state?.slots.filter(Boolean).map((s) => s.file));
+    const world = (f) => byId.get(f.id)?.world || "";
+    // filter chips: favourites + the worlds you own figures from
+    const worlds = [...new Set(figures.map(world).filter(Boolean))].sort();
+    if (figures.length > 4) {
+      const chips = add("", "chips");
+      for (const w of ["★ Favoritas", ...worlds]) {
+        const c = document.createElement("button"); c.textContent = w;
+        if (w === worldFilter) c.className = "on";
+        c.onclick = () => { worldFilter = worldFilter === w ? null : w; renderList(); };
+        chips.appendChild(c);
+      }
+    }
+    const rows = figures
+      .filter((f) => match(label(f), world(f), f.file, byId.get(f.id)?.ab))
+      .filter((f) => !worldFilter || (worldFilter === "★ Favoritas" ? f.fav : world(f) === worldFilter))
+      .sort((a, b) => b.fav - a.fav || label(a).localeCompare(label(b)));
+    if (!rows.length) add(figures.length ? "Nada encontrado" : "Ainda não tens figuras.<br>Cria-as em <b>Criar nova</b>.", "empty-msg");
+    for (const f of rows) {
+      const used = onPad.has(f.file);
+      const pic = (window.IMAGES || {})[f.id];
+      const d = add(`${pic ? `<img class="li" src="${pic}" alt="">` : `<span class="li"></span>`}<span class="nm">${esc(label(f))}<small>${used ? "no pad · tocar para mover" : esc(world(f))}</small></span>
+        <button class="ic${f.fav ? " star" : ""}" title="Favorita">${f.fav ? "★" : "☆"}</button>
+        <button class="ic" title="Mudar o nome">✎</button><button class="ic" title="Apagar">🗑</button>`,
+        "item" + (used ? " used" : ""),
+        () => { closeAll(); act(api("/api/place", { slot: target, file: f.file })); });
+      const [fav, ren, del] = d.querySelectorAll("button");
+      fav.onclick = (e) => { e.stopPropagation(); f.fav = !f.fav; renderList(); act(api("/api/figures/fav", { file: f.file, on: f.fav ? 1 : 0 })); };
+      ren.onclick = (e) => {
+        e.stopPropagation();
+        const to = prompt("Novo nome:", f.file.replace(/\.bin$/i, ""));
+        if (to && to.trim()) act(api("/api/figures/rename", { file: f.file, to: to.trim() }).then(() => loadFigures()).then(renderList));
+      };
+      del.onclick = (e) => {
+        e.stopPropagation();
+        if (confirm(`Apagar "${label(f)}"?\nO ficheiro vai para a pasta Figuras\\_apagadas (dá para recuperar).`))
+          act(api("/api/figures/delete", { file: f.file }).then(() => { toast("Apagada"); return loadFigures(); }).then(renderList));
+      };
+    }
+  } else {
+    const section = (title, rows) => {
+      rows = rows.filter(([, n, w, ab, owner]) => match(n, C.worlds[w], ab, owner));
+      if (!rows.length) return;
+      add(title, "sec");
+      let lastOwner = null;
+      const grouped = rows.some((r) => r[4]); // vehicles with an owner: group by owner, builds 1/2/3 together
+      if (grouped)
+        rows = [...rows].sort((a, b) => (a[4] || "~").localeCompare(b[4] || "~") || (a[5] || 0) - (b[5] || 0) || a[1].localeCompare(b[1]));
+      for (const [id, name, w, , owner, build] of rows) {
+        if (grouped && (owner || "") !== lastOwner) add(esc(owner || "Outros"), "sub");
+        lastOwner = owner || "";
+        add(`<span>${build ? build + ". " : ""}${esc(name)}</span><small>${esc(C.worlds[w])}</small>`, "item", () => {
+          closeAll();
+          act(api("/api/create", { id, name, slot: target }).then((r) => toast("Criada: " + r.file)));
+        });
+      }
+    };
+    section("Personagens", C.chars);
+    section("Veículos e gadgets", C.vehicles);
+    if (!list.children.length) add("Nada encontrado", "empty-msg");
+  }
+  list.scrollTop = 0;
+}
+
+// ---- loadouts
+const KEYS = ["A", "B", "X", "Y"];
+async function loadLoadouts() {
+  const list = await (await fetch("/api/loadouts")).json();
+  const box = $("#loadouts"); box.textContent = "";
+  if (!list.length) {
+    box.innerHTML = '<div class="help" style="margin:0">Põe as figuras no pad e toca em <b>Guardar pad atual</b>. As 4 primeiras ficam nos botões A B X Y do comando.</div>';
+    return;
+  }
+  list.forEach((l, i) => {
+    const row = document.createElement("div"); row.className = "lo";
+    const n = l.slots.filter(Boolean).length;
+    const go = document.createElement("button"); go.className = "go";
+    go.innerHTML = `<span class="k">${KEYS[i] || ""}</span><span></span><small style="color:var(--dim);margin-left:auto">${n} fig.</small>`;
+    go.children[1].textContent = l.name;
+    go.onclick = () => act(api("/api/loadouts/apply", { i }).then(() => toast("Loadout: " + l.name)));
+    const up = document.createElement("button"); up.className = "sm"; up.textContent = "↑"; up.disabled = i === 0;
+    up.onclick = () => act(api("/api/loadouts/up", { i }).then(loadLoadouts));
+    const del = document.createElement("button"); del.className = "sm"; del.textContent = "✕";
+    del.onclick = () => { if (confirm(`Apagar o loadout "${l.name}"?`)) act(api("/api/loadouts/delete", { i }).then(loadLoadouts)); };
+    row.append(go, up, del); box.appendChild(row);
+  });
+}
+$("#loSave").onclick = () => {
+  if (!state?.slots.some(Boolean)) return toast("O pad está vazio");
+  const name = prompt("Nome do loadout:");
+  if (name && name.trim()) act(api("/api/loadouts/save", { name: name.trim() }).then(() => { toast("Guardado"); loadLoadouts(); }));
+};
+loadLoadouts().catch(() => {});
+
+// ---- live state
+let boot = null;
+function connect() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (e) => {
+    const s = JSON.parse(e.data);
+    // Cemu was restarted (maybe updated): reload so the phone always runs the current page
+    if (boot && s.boot && s.boot !== boot) return location.reload();
+    boot = boot || s.boot;
+    const newFile = s.slots.some((x) => x && x.file && !figures.some((f) => f.file === x.file));
+    state = s; render();
+    if (newFile) loadFigures().then(render).catch(() => {});
+  };
+  es.onerror = () => { const st = $("#status"); st.textContent = "sem ligação ao PC"; st.className = "bad"; };
+}
+loadFigures().catch(() => {}).finally(() => { fetch("/api/state").then((r) => r.json()).then((s) => { state = s; render(); }).catch(() => {}); connect(); });
+</script>
+</body>
+</html>

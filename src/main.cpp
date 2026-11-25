@@ -24,6 +24,7 @@
 #include "hle/overrides/hle_anomaly.h"
 #include "hle/overrides/hle_mods.h"
 #include "hle/overrides/hle_toypad.h"
+#include "hle/overrides/hle_toypadremote.h"
 #include "hle/overrides/hle_videoout.h"
 #include "render/vulkan_backend.h"
 #include "hle/overrides/hle_override.h"
@@ -1275,6 +1276,11 @@ int main(int argc, char** argv) {
     bool selftest = false;
     bool toypad = true; // Fase 27: o Toy Pad virtual passa a ser o padrao (--no-toypad desliga)
     int toypad_port = 9191;
+    // Toy Pad Remote (servidor HTTP para o telemovel, embutido no jogo como no Cemu)
+    bool toypad_remote = false;
+    int toypad_remote_port = 8090;
+    std::string toypad_remote_pin;
+    std::filesystem::path toypad_remote_figures;
     bool real_toypad = true; // Fase 61: --no-real-toypad ignora o portal fisico
     std::filesystem::path portal_file = root / "assets" / "portal.json";
     std::filesystem::path radar_log = root / "build" / "radar_arquivos.log";
@@ -1594,6 +1600,14 @@ int main(int argc, char** argv) {
             real_toypad = false; // Fase 61: mesmo com o portal fisico ligado, usa o virtual (portal.json / app)
         } else if (!std::strcmp(argv[i], "--toypad-port") && i + 1 < argc) {
             toypad_port = std::atoi(argv[++i]); // porta do listener do app LegoToypad (0 = desligado)
+        } else if (!std::strcmp(argv[i], "--toypad-remote")) {
+            toypad_remote = true; // servidor HTTP do Toy Pad Remote (telemovel), dentro do jogo
+        } else if (!std::strcmp(argv[i], "--toypad-remote-port") && i + 1 < argc) {
+            toypad_remote_port = std::atoi(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--toypad-remote-pin") && i + 1 < argc) {
+            toypad_remote_pin = argv[++i];
+        } else if (!std::strcmp(argv[i], "--toypad-remote-figures") && i + 1 < argc) {
+            toypad_remote_figures = std::filesystem::u8path(argv[++i]);
         } else if (!std::strcmp(argv[i], "--selftest")) {
             selftest = true;
         } else {
@@ -1732,6 +1746,20 @@ int main(int argc, char** argv) {
         hle::StartPortalWatcher(portal_file);
         std::printf("portal     : %s  (reread every 500 ms)\n", hle::fs::PathText(portal_file).c_str());
         hle::StartToypadListener(toypad_port);
+        if (toypad_remote) {
+            // O remote escreve no mesmo portal que o portal.json e o app LegoToypad; a partir da
+            // primeira accao do telemovel e ele que manda (TakeToypadExternalControl), como a app.
+            const std::filesystem::path figures =
+                !toypad_remote_figures.empty() ? toypad_remote_figures : root / "assets" / "toypad_remote" / "figures";
+            std::string remote_err;
+            if (hle::toypad_remote::Start(toypad_remote_port, toypad_remote_pin, figures, &remote_err)) {
+                std::printf("toypad-rem : %s  (figures: %s)\n", hle::toypad_remote::Url().c_str(),
+                            hle::fs::PathText(figures).c_str());
+                std::printf("             abre esse endereco no telemovel; POST sem o cabecalho X-TPR e recusado\n");
+            } else {
+                std::printf("toypad-rem : NOT started: %s\n", remote_err.c_str());
+            }
+        }
     }
     hle::videoout::SetWindowEnabled(window && !selftest);
     hle::SetStubLogger(&hle::log::StubLogger);
