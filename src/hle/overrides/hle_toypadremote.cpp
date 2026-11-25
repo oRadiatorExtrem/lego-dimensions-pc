@@ -10,9 +10,14 @@
 
 #include "hle_toypadremote.h"
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
 #include "hle/overrides/hle_toypad.h"
 
 #include "ToypadRemoteCore.h" // nucleo partilhado
+#include "catalog_data.h"    // tabela de nomes partilhada
+
 
 #include <algorithm>
 #include <array>
@@ -198,8 +203,9 @@ class RecompHost final : public ::toypad_remote::ToypadHost {
         return toypad::TagCharacterId(data);
     }
 
-    std::string CatalogName(uint32_t) override {
-        return {}; // o port nao tem tabela de nomes: o nucleo cai no nome do ficheiro (ou no id)
+    std::string CatalogName(uint32_t id) override {
+        // tabela partilhada com o Cemu: id -> nome canonico (o ficheiro pode ser renomeado)
+        return ::toypad_remote::CatalogName(id);
     }
 
     std::string FiguresDir() override {
@@ -280,6 +286,9 @@ bool Start(int port, const std::string& pin, const std::filesystem::path& figure
     ::toypad_remote::Config config;
     config.port = port;
     config.pin = pin;
+    // icones (/img/<id>.png) e templates do utilizador ficam ao lado das figuras: nada disto e'
+    // distribuido com o port. Sem a pasta, o web app mostra o marcador com o id.
+    config.data_dir = figures_dir.parent_path().string();
     std::string reason;
     if (!::toypad_remote::Core::Instance().Start(g_host, config, reason)) {
         if (err) {

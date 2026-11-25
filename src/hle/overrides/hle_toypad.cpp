@@ -1,5 +1,7 @@
 #include "hle/overrides/hle_toypad.h"
 
+#include "vehicle_upgrades.h" // tabela partilhada (toypad-remote-core)
+
 #include <bit>
 #include <chrono>
 #include <filesystem>
@@ -419,6 +421,14 @@ TagData BuildTag(const Uid& uid, u32 character_id) {
         // Veiculo/gadget: id em claro na pagina 0x24 e marcador na 0x26
         Store32(&tag[0x24 * 4], character_id);
         tag[0x26 * 4 + 1] = 0x01;
+        // Melhorias de fabrica nas paginas 35 e 37. Sem elas a tag leva zeros e o jogo responde
+        // "Please update to access the upgrades for this item". A tabela so tem numeros e vem do
+        // nucleo partilhado (o mesmo que o fork de Cemu usa), por isso nao ha .bin de terceiros.
+        u32 page35 = 0, page37 = 0;
+        if (toypad_remote::FactoryUpgrades(character_id, &page35, &page37)) {
+            Store32(&tag[35 * 4], page35);
+            Store32(&tag[37 * 4], page37);
+        }
     }
 
     // Pagina 0x2B: senha de leitura derivada do UID

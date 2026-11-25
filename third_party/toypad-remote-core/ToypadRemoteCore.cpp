@@ -27,7 +27,9 @@
 #include <thread>
 #include <vector>
 
-#include "web_assets.h" // gerado por web_embed.py (site embutido no executavel)
+#include "web_assets.h"    // gerado por web_embed.py (site embutido no executavel)
+#include "catalog_data.h"  // gerado por gen_catalog.py (id -> nome, mundo)
+#include "vehicle_upgrades.h" // gerado por gen_vehicle_upgrades.py (melhorias de fabrica)
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -534,10 +536,13 @@ struct Core::Impl {
             return s.file.substr(0, s.file.size() - 4); // tira o ".bin"
         }
         if (host) {
-            const std::string name = host->CatalogName(s.id);
-            if (!name.empty()) {
-                return name;
+            const std::string hosted = host->CatalogName(s.id);
+            if (!hosted.empty()) {
+                return hosted;
             }
+        }
+        if (const char* shared = ::toypad_remote::CatalogName(s.id); shared && *shared) {
+            return shared;
         }
         char buf[16];
         std::snprintf(buf, sizeof(buf), "0x%08X", s.id);
@@ -715,6 +720,21 @@ struct Core::Impl {
         if (path == "/") {
             path = "/index.html";
         }
+        // 0) dados do utilizador: /img/<id>.png e /templates/<id>.bin (nao sao distribuidos)
+        if (!config.data_dir.empty() && (path.rfind("/img/", 0) == 0 || path.rfind("/templates/", 0) == 0)) {
+            std::error_code ec_data;
+            const fs::path data_file = fs::path(config.data_dir) / fs::path(path.substr(1));
+            if (fs::is_regular_file(data_file, ec_data)) {
+                std::ifstream in(data_file, std::ios::binary);
+                if (in) {
+                    std::ostringstream ss;
+                    ss << in.rdbuf();
+                    res.set_content(ss.str(), MimeFor(path));
+                    res.set_header("Cache-Control", "max-age=86400");
+                    return true;
+                }
+            }
+        }
         // 1) pasta em disco (desenvolvimento) ganha ao embutido
         if (!config.web_dir.empty()) {
             std::error_code ec;
@@ -788,6 +808,36 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
             }
         }
         return httplib::Server::HandlerResponse::Unhandled;
+    });
+
+    // images.js gerado a partir dos icones que o utilizador tem em <data_dir>/img/<id>.png.
+    // Assim os icones sao exactamente os mesmos do Cemu (o ficheiro e o mesmo); sem a pasta, o
+    // web app cai no marcador que ja tem, e nada se parte.
+    srv.Get("/images.js", [this](const httplib::Request&, httplib::Response& res) {
+        std::string js = "window.IMAGES={";
+        bool first = true;
+        if (!config.data_dir.empty()) {
+            std::error_code ec;
+            const fs::path dir = fs::path(config.data_dir) / "img";
+            for (const auto& entry : fs::directory_iterator(dir, ec)) {
+                if (!entry.is_regular_file(ec) || entry.path().extension() != ".png") {
+                    continue;
+                }
+                const std::string stem = NarrowPath(entry.path().stem());
+                bool numeric = !stem.empty() && std::all_of(stem.begin(), stem.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+                if (!numeric) {
+                    continue;
+                }
+                if (!first) {
+                    js += ',';
+                }
+                first = false;
+                js += "\"" + stem + "\":\"img/" + NarrowPath(entry.path().filename()) + "\"";
+            }
+        }
+        js += "};";
+        res.set_header("Cache-Control", "no-cache");
+        res.set_content(js, "text/javascript");
     });
 
     srv.Get("/api/state", [this](const httplib::Request&, httplib::Response& res) {
