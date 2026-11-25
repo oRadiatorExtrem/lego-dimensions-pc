@@ -179,6 +179,11 @@ std::wstring g_game_dir, g_patch_dir, g_dlc_dir;
 bool g_opt_fps = true, g_opt_console = false, g_opt_fullscreen = false, g_opt_skip = false, g_opt_overlay = false, g_opt_toypad = false;
 // Toy Pad Remote: servidor HTTP dentro do jogo para controlar o portal pelo telemovel.
 bool g_opt_toypad_remote = false;
+// Selector exclusivo do portal: "remote" (telemovel), "app" (tools\LegoToypad.exe) ou "nenhum".
+// Um backend de cada vez, a escolha e' do jogador; g_opt_toypad/g_opt_toypad_remote sao derivados.
+std::wstring g_portal_mode = L"remote";
+bool PortalRemote() { return g_portal_mode == L"remote"; }
+bool PortalApp() { return g_portal_mode == L"app"; }
 std::wstring g_toypad_remote_port = L"8090";
 std::wstring g_toypad_remote_pin; // vazio = sem PIN
 // 4.0 (Fase 79): multiplayer online. Desligado por padrao: sem isso o jogo nao recebe nenhuma opcao --mp-*.
@@ -457,8 +462,9 @@ void SaveSettings() {
     WriteIni(L"idioma", g_lang_value);
     WriteIni(L"pularcenas", g_opt_skip ? L"1" : L"0");
     WriteIni(L"contador", g_opt_overlay ? L"1" : L"0"); // Fase 65
-    WriteIni(L"toypad_auto", g_opt_toypad ? L"1" : L"0");
-    WriteIni(L"toypad_remote", g_opt_toypad_remote ? L"1" : L"0");
+    WriteIni(L"portal_modo", g_portal_mode);
+    WriteIni(L"toypad_auto", PortalApp() ? L"1" : L"0");
+    WriteIni(L"toypad_remote", PortalRemote() ? L"1" : L"0");
     WriteIni(L"remote_port", g_toypad_remote_port);
     WriteIni(L"remote_pin", g_toypad_remote_pin);
     WriteIni(L"multiplayer", g_opt_mp ? L"1" : L"0"); // 4.0
@@ -1695,7 +1701,7 @@ void RunGame() {
         g_step.clear();
         UpdateStatus();
     }
-    if (g_opt_toypad) {
+    if (PortalApp()) {
         LaunchLegoToypad();
         g_toypad_opened_for_game = true;
     } else {
@@ -1756,7 +1762,7 @@ void RunGame() {
     if (g_opt_overlay) {
         command += L" --stats-overlay"; // Fase 65: contador de FPS / info
     }
-    if (g_opt_toypad_remote) { // portal no telemovel, servidor dentro do jogo
+    if (PortalRemote()) { // portal no telemovel, servidor dentro do jogo
         command += L" --toypad-remote";
         if (!g_toypad_remote_port.empty()) {
             command += L" --toypad-remote-port " + g_toypad_remote_port;
@@ -1764,6 +1770,11 @@ void RunGame() {
         if (!g_toypad_remote_pin.empty()) {
             command += L" --toypad-remote-pin " + g_toypad_remote_pin;
         }
+        // exclusivo: com o remote escolhido, o listener do app LegoToypad (9191) nao sobe
+        command += L" --toypad-port 0";
+    } else if (!PortalApp()) {
+        // "nenhum": o jogo usa so o portal.json; o listener do app tambem nao sobe
+        command += L" --toypad-port 0";
     }
     if (g_opt_mp) { // 4.0: multiplayer online (so com a caixa ligada)
         if (g_mp_server.empty() || g_mp_room.empty()) {
@@ -2894,15 +2905,36 @@ std::vector<Row> Rows() {
     rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Pular cutscenes", L"Skip cutscenes"),
                     ui::T(L"Qualquer cutscene pode ser pulada, mesmo sem 100%.", L"Any cutscene can be skipped, even without 100%."), OnOff(g_opt_skip),
                     toggle(g_opt_skip)});
-    rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Abrir o LegoToypad com o jogo", L"Start LegoToypad with the game"),
-                    ui::T(L"O portal na tela (tools\\LegoToypad.exe).", L"The on-screen portal (tools\\LegoToypad.exe)."), OnOff(g_opt_toypad), toggle(g_opt_toypad)});
-    rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Toy Pad Remote (telemovel)", L"Toy Pad Remote (phone)"),
-                    ui::T(L"O portal no telemovel, dentro do jogo. Visivel na rede local: abre http://<nome-do-PC>:8090. "
-                          L"Com Tailscale e o mesmo link do Cemu.",
-                          L"The portal on your phone, inside the game. Visible on the local network: open http://<pc-name>:8090. "
-                          L"With Tailscale it is the same link as in Cemu."),
-                    OnOff(g_opt_toypad_remote), toggle(g_opt_toypad_remote)});
-    rows.push_back({kTabGame, RowKind::kAction, ui::T(L"Porta e PIN do remote", L"Remote port and PIN"),
+    // Um portal de cada vez: o backend escolhido aqui e' o unico que sobe com o jogo.
+    auto portal_label = [] {
+        if (PortalRemote()) return ui::T(L"Telemovel (Toy Pad Remote)", L"Phone (Toy Pad Remote)");
+        if (PortalApp()) return ui::T(L"Na tela (LegoToypad)", L"On screen (LegoToypad)");
+        return ui::T(L"Nenhum (so o portal.json)", L"None (portal.json only)");
+    };
+    auto portal_hint = [] {
+        if (PortalRemote()) {
+            return ui::T(L"No telemovel, dentro do jogo: http://<nome-do-PC>:8090 (com Tailscale e o mesmo link do Cemu). "
+                         L"Visivel na rede local. Atalhos no comando: segura TouchPad.",
+                         L"On your phone, inside the game: http://<pc-name>:8090 (with Tailscale it is the same link as in Cemu). "
+                         L"Visible on the local network. Controller shortcuts: hold TouchPad.");
+        }
+        if (PortalApp()) {
+            return ui::T(L"O portal na tela (tools\\LegoToypad.exe), como antes.", L"The on-screen portal (tools\\LegoToypad.exe), as before.");
+        }
+        return ui::T(L"So o assets\\portal.json: nenhum portal por cima do jogo.", L"Only assets\\portal.json: no portal on top of the game.");
+    };
+    rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Portal", L"Portal"), portal_hint(), portal_label(), [](int step) {
+                        static const wchar_t* const kModes[] = {L"remote", L"app", L"nenhum"};
+                        int index = 0;
+                        for (int i = 0; i < 3; ++i) {
+                            if (g_portal_mode == kModes[i]) {
+                                index = i;
+                            }
+                        }
+                        g_portal_mode = kModes[(index + (step < 0 ? 2 : 1)) % 3];
+                        SaveSettings();
+                    }});
+    rows.push_back({kTabGame, RowKind::kAction, ui::T(L"Porta e PIN do portal no telemovel", L"Phone portal port and PIN"),
                     ui::T(L"Porta do servidor (8090) e PIN opcional, para quem expoe o servidor fora de casa. Enter: editar.",
                           L"Server port (8090) and optional PIN, for whoever exposes the server outside the home. Enter: edit."),
                     ui::T(L"porta ", L"port ") + g_toypad_remote_port +
@@ -3853,8 +3885,15 @@ void LoadSettings() {
     }
     g_opt_console = ReadIni(L"console", L"0") == L"1";
     g_opt_skip = ReadIni(L"pularcenas", L"0") == L"1";
-    g_opt_toypad = ReadIni(L"toypad_auto", L"0") == L"1";
-    g_opt_toypad_remote = ReadIni(L"toypad_remote", L"0") == L"1";
+    g_portal_mode = ReadIni(L"portal_modo", L"");
+    if (g_portal_mode.empty()) {
+        // launcher antigo: as duas chaves separadas. Se as duas estavam ligadas, o remote ganha.
+        const bool old_remote = ReadIni(L"toypad_remote", L"0") == L"1";
+        const bool old_app = ReadIni(L"toypad_auto", L"0") == L"1";
+        g_portal_mode = old_remote ? L"remote" : old_app ? L"app" : L"nenhum";
+    }
+    g_opt_toypad = PortalApp();
+    g_opt_toypad_remote = PortalRemote();
     g_toypad_remote_port = ReadIni(L"remote_port", L"8090");
     if (g_toypad_remote_port.empty()) {
         g_toypad_remote_port = L"8090";

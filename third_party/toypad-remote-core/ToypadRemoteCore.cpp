@@ -1258,6 +1258,57 @@ void Core::OnGameCommand(const Packet& command) { m_impl->OnGameCommand(command)
 
 void Core::NotifyPortalChanged() { m_impl->NotifyPortalChanged(); }
 
+int Core::LoadoutCount() {
+    return static_cast<int>(m_impl->ReadLoadouts().size());
+}
+
+std::string Core::LoadoutName(int index) {
+    const auto list = m_impl->ReadLoadouts();
+    if (index < 0 || index >= static_cast<int>(list.size())) {
+        return {};
+    }
+    return list[static_cast<size_t>(index)].name;
+}
+
+bool Core::ApplyLoadout(int index, std::string* err) {
+    const auto list = m_impl->ReadLoadouts();
+    if (index < 0 || index >= static_cast<int>(list.size())) {
+        if (err) {
+            *err = "loadout desconhecido";
+        }
+        return false;
+    }
+    const std::string reason = m_impl->ApplyLoadout(list[static_cast<size_t>(index)]);
+    if (!reason.empty()) {
+        if (err) {
+            *err = reason;
+        }
+        return false;
+    }
+    return true;
+}
+
+int Core::BlinkingZone() {
+    // O jogo pisca (modo 'F') ou faz fade (modo 'f') na zona onde quer uma figura. O piscar manda;
+    // o fade e' a segunda escolha, porque o jogo usa fade tambem para "zona pronta".
+    std::array<LedState, kPadCount> leds;
+    {
+        std::lock_guard lock(m_impl->mutex);
+        leds = m_impl->leds;
+    }
+    for (int zone = 0; zone < kPadCount; ++zone) {
+        if (leds[static_cast<size_t>(zone)].mode == 'F') {
+            return zone + 1;
+        }
+    }
+    for (int zone = 0; zone < kPadCount; ++zone) {
+        if (leds[static_cast<size_t>(zone)].mode == 'f') {
+            return zone + 1;
+        }
+    }
+    return 0;
+}
+
 void Core::SetSelected(int slot) {
     std::lock_guard lock(m_impl->mutex);
     if (m_impl->selected != slot) {

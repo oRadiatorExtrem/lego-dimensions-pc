@@ -17,6 +17,8 @@
 //   L3 0x0002  R3 0x0004  OPTIONS 0x0008  UP 0x0010  RIGHT 0x0020  DOWN 0x0040  LEFT 0x0080
 //   L2 0x0100  R2 0x0200  L1 0x0400  R1 0x0800  TRIANGLE 0x1000  CIRCLE 0x2000  CROSS 0x4000
 //   SQUARE 0x8000  TOUCHPAD 0x100000
+#include "hle/overrides/hle_toypadremote.h"
+
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -483,10 +485,17 @@ void ReadLiveFile(double now, int player) {
         step.start_s = cursor;
         step.end_s = cursor + hold_ms / 1000.0;
         step.player = player;
-        for (const auto& b : kButtonNames) {
-            if (name == b.name) {
-                step.button = b.bit;
+        // "touchpad+down:150" segura dois botoes ao mesmo tempo (os atalhos do Toy Pad sao
+        // combinacoes com o modificador: sem isto nao se testavam).
+        for (const char* part = name.c_str(); part && *part;) {
+            const char* plus = std::strchr(part, '+');
+            const std::string one(part, plus ? static_cast<size_t>(plus - part) : std::strlen(part));
+            for (const auto& b : kButtonNames) {
+                if (one == b.name) {
+                    step.button |= b.bit;
+                }
             }
+            part = plus ? plus + 1 : nullptr;
         }
         for (const auto& a : kAxes) {
             if (name == a.name) {
@@ -639,6 +648,8 @@ HLE_IMPL(int, scePadReadState, int handle, PadData* data, u64 guest_rbp) {
         const int slot = handle - kPadHandle;
         Input other;
         const bool present = ReadOtherPlayer(slot, other);
+        // atalhos do Toy Pad (F5/F6): por jogador, para o co-op ter a sua propria selecao
+        other.buttons = toypad_remote::HandleGamepad(slot + 1, other.buttons);
         std::memset(data, 0, sizeof(*data));
         data->buttons = other.buttons;
         data->left_x = other.lx;
@@ -774,6 +785,9 @@ HLE_IMPL(int, scePadReadState, int handle, PadData* data, u64 guest_rbp) {
         in.rx = 128;
         in.ry = 128;
     }
+
+    // atalhos do Toy Pad (F5/F6): com o modificador em baixo o jogo nao ve os botoes
+    in.buttons = toypad_remote::HandleGamepad(0, in.buttons);
 
     std::memset(data, 0, sizeof(*data));
     data->buttons = in.buttons;

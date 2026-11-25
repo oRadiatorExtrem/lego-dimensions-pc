@@ -74,6 +74,17 @@ class Core {
     // Posicao selecionada pelos atalhos no comando (-1 = nenhuma).
     void SetSelected(int slot);
 
+    // ---------------------------------------------------------------- atalhos no comando
+    // Quantos loadouts existem (para os atalhos A/B/X/Y poderem mostrar o nome).
+    int LoadoutCount();
+    // Aplica o loadout `index` (ordem do loadouts.txt). Devolve false e o motivo em `err`.
+    bool ApplyLoadout(int index, std::string* err);
+    // Nome do loadout `index` ("" se nao existir).
+    std::string LoadoutName(int index);
+    // Zona (1 centro, 2 esquerda, 3 direita) que o jogo esta a piscar agora (0 = nenhuma). O jogo
+    // pisca uma zona quando quer uma figura la: e o alvo natural do atalho "mover para onde pisca".
+    int BlinkingZone();
+
   private:
     Core();
     ~Core();

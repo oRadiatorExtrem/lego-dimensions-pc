@@ -88,6 +88,7 @@ add_executable(lego_dimensions
     src/hle/overrides/hle_toypad.cpp
     src/hle/overrides/hle_toypad_listener.cpp
     src/hle/overrides/hle_toypadremote.cpp
+    src/hle/overrides/hle_toypadremote_keys.cpp
     # nucleo partilhado do Toy Pad Remote (o mesmo que o fork de Cemu usa; copiado por sync.py)
     third_party/toypad-remote-core/ToypadRemoteCore.cpp
     src/hle/overrides/hle_toypad_hid.cpp

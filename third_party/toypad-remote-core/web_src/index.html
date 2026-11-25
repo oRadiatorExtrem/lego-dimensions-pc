@@ -19,6 +19,7 @@ header{display:flex;align-items:center;justify-content:space-between;padding:12p
 h1{font-size:18px;margin:0;letter-spacing:.5px}
 #status{font-size:12px;padding:4px 10px;border-radius:99px;background:var(--card2);color:var(--dim)}
 #status.ok{color:var(--ok)}#status.bad{color:var(--bad)}
+#pad .zone.wants{box-shadow:inset 0 0 0 2px var(--acc);border-radius:16px}
 #pad{display:grid;grid-template-columns:1fr .9fr 1fr;gap:10px;padding:12px;border-radius:22px;background:#0b0c10;box-shadow:inset 0 0 0 2px #262a36}
 .zone{--led:0,0,0;border-radius:18px;padding:8px;display:grid;gap:8px;background:rgba(var(--led),.22);box-shadow:0 0 0 2px rgba(var(--led),.9),0 0 26px rgba(var(--led),.55);transition:background .25s,box-shadow .25s}
 .side{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
@@ -48,6 +49,7 @@ h2 button{font-size:12px;padding:7px 10px;text-transform:none;letter-spacing:0}
 #menu .zones{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px}
 #menu .zones button:disabled{opacity:.35}
 #hint{color:var(--dim);font-size:13px;text-align:center;margin:12px 0;min-height:18px}
+#hint.cta{background:var(--acc);color:#241c00;font-weight:700;font-size:15px;padding:14px;border-radius:14px;cursor:pointer}
 #hint b{color:var(--acc)}
 @keyframes flash{50%{background:rgba(var(--led),.05);box-shadow:0 0 0 2px rgba(var(--led),.2)}}
 @keyframes rainbow{0%{filter:hue-rotate(0)}100%{filter:hue-rotate(360deg)}}
@@ -112,9 +114,10 @@ button.danger{color:var(--bad)}
 <h2>Loadouts <button id="loSave">+ Guardar pad atual</button></h2>
 <div id="loadouts"></div>
 
-<div class="help"><b>Comando</b> (segura <b>Home</b>):<br>
+<div class="help"><b>Comando</b> (segura <b>Home</b>, ou <b>TouchPad</b> no port):<br>
 ◀ ▲ ▶ mover a figura 🎮 para Esquerda / Centro / Direita<br>
-▼ ou R / L escolher figura · A B X Y aplicar loadout 1 2 3 4</div>
+▼ ou R / L escolher figura · ✕ mover para a zona que o jogo pisca<br>
+□ ○ △ / R2 aplicar loadout 1 2 3 4</div>
 
 <div id="shade"></div>
 <div id="sheet">
@@ -142,6 +145,7 @@ for (const [id, name, w, ab] of C.chars) byId.set(id, { id, name, world: C.world
 for (const [id, name, w, ab] of C.vehicles) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: true });
 
 let state = null, figures = [], target = null, moving = null, tab = "mine", worldFilter = null;
+let autoSheetDone = false; // a biblioteca abre sozinha uma vez, quando o pad esta vazio
 
 // ---- api
 async function api(path, params) {
@@ -217,11 +221,27 @@ function render() {
     el.append(s ? slotLabel(s) : "+");
   });
   renderLeds(state.leds);
+  document.querySelectorAll("#pad .zone").forEach((zone) => {
+    const pad = +zone.dataset.pad;
+    const led = state.leds[pad - 1] || {};
+    zone.classList.toggle("wants", led.m === "F" || led.m === "f");
+  });
   const st = $("#status");
   st.textContent = state.awake ? "jogo ligado" : "à espera do jogo";
   st.className = state.awake ? "ok" : "";
+  const emptyPad = !state.slots.some(Boolean);
+  const cta = emptyPad && moving === null;
   $("#hint").innerHTML = moving !== null ? "<b>Toca no espaço de destino</b> (ou no mesmo para cancelar)"
-    : state.slots.some(Boolean) ? "Arrasta uma figura para outro espaço · larga fora do pad para a retirar" : "Toca num espaço para pôr uma figura";
+    : cta ? "Toca aqui para escolher a primeira figura"
+    : "Arrasta uma figura para outro espaço · larga fora do pad para a retirar";
+  $("#hint").classList.toggle("cta", cta);
+  $("#hint").onclick = cta ? () => { openSheet(); } : null;
+
+  // Primeira vez: com o pad vazio, abre logo a biblioteca (era o passo que ninguem descobria).
+  if (cta && !autoSheetDone && state.awake) {
+    autoSheetDone = true;
+    setTimeout(() => { if (!moving && !$("#sheet").classList.contains("open")) openSheet(); }, 600);
+  }
 }
 
 // ---- drag & drop: onto a spot (moves / swaps), onto a zone (first free spot), outside the pad (removes)
