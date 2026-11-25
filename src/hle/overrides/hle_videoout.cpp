@@ -2275,6 +2275,36 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
                     log::Tagged("VULKAN", "initialized on retry %d: %s", retries + 1, renderer.Describe().c_str());
                 } else if (retries < 40) {
                     ++retries;
+                    // 4.4.50: enumeracao sem nenhuma GPU (erro ou lista vazia) nao e transitorio - e um
+                    // driver grafico partido, tipicamente o da integrada num portatil hibrido, que parte o
+                    // Vulkan para o sistema inteiro (nem a discreta aparece). Duas tentativas (~15 s) ja
+                    // descartam um TDR ou o driver ainda a arrancar; dai para a frente repetir nao leva a
+                    // lado nenhum: explica ao jogador e sai de forma limpa.
+                    if (renderer.EnumerationFailed() && retries >= 2) {
+                        static bool fatal_logged = false; // uma linha chega: o motivo completo ja esta no ERROR acima
+                        if (!fatal_logged) {
+                            fatal_logged = true;
+                            log::Tagged("VULKAN", "fatal: %s", renderer.LastError().c_str());
+                        }
+                        const char* message = lang::Pt()
+                            ? "O Vulkan nao encontrou nenhuma placa grafica utilizavel neste sistema.\n\n"
+                              "Em portateis com duas graficas (integrada + discreta), isto quase sempre vem de um "
+                              "driver da integrada antigo ou partido (ex.: AMD Radeon) que parte a enumeracao do "
+                              "Vulkan para o sistema inteiro - nem a grafica discreta aparece.\n\n"
+                              "O que fazer: reinstale o driver da grafica integrada com reposicao de fabrica "
+                              "(AMD Software -> Definicoes -> Restaurar de fabrica) e/ou o driver da discreta "
+                              "(NVIDIA, instalacao limpa), confirme com 'vulkaninfo --summary' e volte a abrir o jogo."
+                            : "Vulkan found no usable graphics card on this system.\n\n"
+                              "On hybrid laptops (integrated + discrete GPU) this is almost always a broken or "
+                              "outdated integrated GPU driver (e.g. AMD Radeon) that breaks Vulkan enumeration for "
+                              "the whole system - even the discrete GPU is not listed.\n\n"
+                              "What to do: clean-reinstall the integrated GPU driver (AMD Software -> Factory Reset) "
+                              "and/or the discrete GPU driver (NVIDIA), check with 'vulkaninfo --summary' and start "
+                              "the game again.";
+                        MessageBoxA(hwnd, message, "LEGO Dimensions PC", MB_OK | MB_ICONERROR);
+                        std::fflush(stdout);
+                        ExitProcess(1); // sair limpo: o jogo ficou a correr sem renderer, nao ha mais nada a fazer
+                    }
                 }
             }
             InvalidateRect(hwnd, nullptr, FALSE); // sem Vulkan: redesenha o texto por GDI

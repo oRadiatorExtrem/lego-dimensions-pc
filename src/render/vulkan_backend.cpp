@@ -487,6 +487,38 @@ bool Fail(const char* what, VkResult result = VK_SUCCESS) {
     return false;
 }
 
+// 4.4.50: marcado quando vkEnumeratePhysicalDevices devolve erro ou zero dispositivos. Diferente de
+// "a GPU nao tem swapchain/queue": aí a lista existe e o retry de 5 s da janela faz sentido (driver a
+// arrancar, remote desktop, TDR). Zero dispositivos nao e transitorio na maioria dos casos reais e o
+// chamador (janela) usa o sinal para mostrar a explicacao completa e sair, em vez de repetir para sempre.
+std::atomic<bool> g_enumeration_failed{false};
+
+// 4.4.50: caso real documentado (portatil hibrido Ryzen 5 4600H + GTX 1650 Ti): com o amdvlk64.dll de
+// 2020 (driver 27.20.11028) instalado a par do driver NVIDIA 610.47, o loader Vulkan 1.4.341 falha a
+// enumeracao com VK_INCOMPLETE e zero dispositivos - nem a discreta aparece, e o jogo ficava numa
+// janela branca sem resposta (o init pendura a thread da janela antes do loop de mensagens). Cada
+// driver isolado enumera bem. A causa tipica e o driver da integrada (Vega) antigo/partido; o retry
+// nao resolve nada. A mensagem diz exatamente isso ao jogador.
+bool FailNoDevices(VkResult result, u32 count) {
+    char text[560];
+    std::snprintf(text, sizeof(text),
+                  "vkEnumeratePhysicalDevices found no usable GPU (%s, %u devices). On hybrid laptops "
+                  "(integrated + discrete GPU) this is almost always a broken or outdated driver of the "
+                  "integrated GPU (e.g. AMD Radeon) that breaks Vulkan enumeration for the whole system, so "
+                  "even the discrete GPU is not listed. Fix: clean-reinstall the integrated GPU driver (AMD "
+                  "Software -> Factory Reset option) and/or the discrete GPU driver (NVIDIA), then check with "
+                  "'vulkaninfo --summary' and start the game again.",
+                  ResultName(result), count);
+    g.error = text;
+    g_enumeration_failed.store(true, std::memory_order_relaxed);
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true)) {
+        std::printf("[VULKAN] ERROR: %s\n", text);
+        std::fflush(stdout);
+    }
+    return false;
+}
+
 bool LoadLibraryAndGlobals() {
     g.library = LoadLibraryA("vulkan-1.dll");
     if (!g.library) {
@@ -691,9 +723,20 @@ bool CreateSurface(HWND hwnd) {
 // extensao VK_KHR_swapchain.
 bool PickPhysicalDevice() {
     u32 count = 0;
-    vk.vkEnumeratePhysicalDevices(g.instance, &count, nullptr);
+    // 4.4.50: os dois resultados eram ignorados - com o loader a devolver VK_INCOMPLETE (drivers hibridos
+    // em conflito) a lista ficava vazia e o motivo real nunca chegava ao jogador (janela branca, sem log).
+    // A chamada de contagem com VK_INCOMPLETE e sempre um caso partido: o loader nao escreveu nada.
+    const VkResult counted = vk.vkEnumeratePhysicalDevices(g.instance, &count, nullptr);
+    if (counted != VK_SUCCESS || count == 0) {
+        return FailNoDevices(counted, count);
+    }
     std::vector<VkPhysicalDevice> devices(count);
-    vk.vkEnumeratePhysicalDevices(g.instance, &count, devices.data());
+    const VkResult listed = vk.vkEnumeratePhysicalDevices(g.instance, &count, devices.data());
+    if (listed == VK_INCOMPLETE && count <= devices.size()) {
+        devices.resize(count); // lista parcial ainda e utilizavel
+    } else if (listed != VK_SUCCESS || count == 0) {
+        return FailNoDevices(listed, count);
+    }
     int best_score = -1;
     for (VkPhysicalDevice device : devices) {
         u32 extension_count = 0;
@@ -4258,6 +4301,7 @@ bool VulkanRenderer::Initialize(void* hwnd) {
     CreatePipelineCache(); // Fase 70
     g.active = true;
     g_prepare_open = true;
+    g_enumeration_failed.store(false, std::memory_order_relaxed); // 4.4.50: correu - nao e mais fatal
     return true;
 }
 
@@ -8547,6 +8591,10 @@ void VulkanRenderer::Shutdown() {
 
 bool VulkanRenderer::Active() const {
     return g.active;
+}
+
+bool VulkanRenderer::EnumerationFailed() const {
+    return g_enumeration_failed.load(std::memory_order_relaxed);
 }
 
 const std::string& VulkanRenderer::LastError() const {

@@ -311,6 +311,10 @@ public:
 
     bool Active() const;
     const std::string& LastError() const;
+    // 4.4.50: true quando a última inicialização falhou porque vkEnumeratePhysicalDevices não
+    // devolveu nenhuma GPU (erro ou lista vazia). Não é um caso transiente: o chamador com janela
+    // usa isto para mostrar a explicação de drivers híbridos e sair, em vez de repetir para sempre.
+    bool EnumerationFailed() const;
     // Uma linha com GPU escolhida, formato e tamanho do swapchain, para o log.
     std::string Describe() const;
     u64 FramesPresented() const;
