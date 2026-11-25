@@ -866,134 +866,122 @@ void LoadPortalState(const std::filesystem::path& path) {
     }
 
     size_t slots_pos = json.find("\"slots\"");
-    if (slots_pos != std::string::npos) {
-        size_t arr_open = json.find('[', slots_pos);
-        size_t arr_close = json.find(']', arr_open);
-        if (arr_open != std::string::npos && arr_close != std::string::npos) {
-            size_t pos = arr_open + 1;
-            while (pos < arr_close) {
-                size_t obj_open = json.find('{', pos);
-                if (obj_open == std::string::npos || obj_open >= arr_close) break;
-                size_t obj_close = json.find('}', obj_open);
-                if (obj_close == std::string::npos || obj_close > arr_close) break;
-
-                std::string obj = json.substr(obj_open, obj_close - obj_open + 1);
-                auto get_num = [&](const std::string& key) -> int {
-                    size_t kp = obj.find(key);
-                    if (kp == std::string::npos) return -1;
-                    size_t col = obj.find(':', kp);
-                    if (col == std::string::npos) return -1;
-                    return std::atoi(obj.c_str() + col + 1);
-                };
-                int idx = get_num("\"index\"");
-                int pad = get_num("\"pad\"");
-                int id = get_num("\"id\"");
-
-                Uid uid{};
-                size_t uid_pos = obj.find("\"uid\"");
-                if (uid_pos != std::string::npos) {
-                    size_t u_open = obj.find('[', uid_pos);
-                    size_t u_close = obj.find(']', u_open);
-                    if (u_open != std::string::npos && u_close != std::string::npos) {
-                        size_t cur = u_open + 1;
-                        for (int k = 0; k < 7; ++k) {
-                            cur = obj.find_first_of("0123456789", cur);
-                            if (cur == std::string::npos || cur > u_close) break;
-                            uid[k] = static_cast<u8>(std::strtoul(obj.c_str() + cur, nullptr, 10));
-                            cur = obj.find_first_not_of("0123456789", cur);
-                        }
-                    }
-                }
-
-                std::string fpath;
-                size_t p_pos = obj.find("\"path\"");
-                if (p_pos != std::string::npos) {
-                    size_t str_open = obj.find('\"', obj.find(':', p_pos) + 1);
-                    if (str_open != std::string::npos) {
-                        size_t str_close = obj.find('\"', str_open + 1);
-                        while (str_close != std::string::npos && obj[str_close - 1] == '\\') {
-                            str_close = obj.find('\"', str_close + 1);
-                        }
-                        if (str_close != std::string::npos) {
-                            fpath = obj.substr(str_open + 1, str_close - str_open - 1);
-                            std::string unesc;
-                            for (size_t c = 0; c < fpath.size(); ++c) {
-                                if (fpath[c] == '\\' && c + 1 < fpath.size() && fpath[c + 1] == '\\') {
-                                    unesc += '\\';
-                                    ++c;
-                                } else {
-                                    unesc += fpath[c];
-                                }
-                            }
-                            fpath = unesc;
-                        }
-                    }
-                }
-
-                if (idx >= 0 && idx < kSlotCount && pad >= 1 && pad <= kPadCount) {
-                    Figure& f = g_figures[idx];
-                    f.present = true;
-                    f.pad = pad;
-                    f.id = static_cast<u32>(id);
-                    f.uid = uid;
-                    f.path = fpath;
-                    bool loaded_from_file = false;
-                    if (!fpath.empty()) {
-                        std::ifstream fin(std::filesystem::u8path(fpath), std::ios::binary);
-                        if (fin && fin.read(reinterpret_cast<char*>(f.data.data()), f.data.size())) {
-                            loaded_from_file = true;
-                        }
-                    }
-                    if (!loaded_from_file) {
-                        f.data = BuildTag(uid, static_cast<u32>(id));
-                    }
-                    log::Tagged("PORTAL", "Restored figure in slot %d pad %d (id %u)", idx, pad, f.id);
-                }
-                pos = obj_close + 1;
-            }
-            return;
-        }
+    if (slots_pos == std::string::npos) {
+        return;
     }
+    // Percorre o array com profundidade: um find(']') simples apanhava o ']' do "uid" da primeira
+    // figura e nenhuma era restaurada (o portal.json ficava a ser ignorado em silencio ao carregar).
+    auto match_bracket = [&](size_t open) -> size_t {
+        int depth = 0;
+        bool in_string = false;
+        for (size_t i = open; i < json.size(); ++i) {
+            const char c = json[i];
+            if (in_string) {
+                if (c == '\\') {
+                    ++i;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '[' || c == '{') {
+                ++depth;
+            } else if (c == ']' || c == '}') {
+                if (--depth == 0) {
+                    return i;
+                }
+            }
+        }
+        return std::string::npos;
+    };
 
-    // Fallback: legacy format without slots
-    for (int pad = 1; pad <= kPadCount; ++pad) {
-        const std::string key = "\"pad" + std::to_string(pad) + "\"";
-        size_t pos = json.find(key);
-        if (pos == std::string::npos) continue;
-        pos = json.find(':', pos + key.size());
-        if (pos == std::string::npos) continue;
-        pos = json.find_first_not_of(" \t\r\n", pos + 1);
-        if (pos == std::string::npos || json[pos] != '{') continue;
-        size_t end = json.find('}', pos);
-        if (end == std::string::npos) continue;
-        std::string obj = json.substr(pos, end - pos);
-        size_t uid_pos = obj.find("\"uid\"");
-        size_t id_pos = obj.find("\"id\"");
-        if (uid_pos == std::string::npos || id_pos == std::string::npos) continue;
-        size_t u_open = obj.find('[', uid_pos);
-        size_t u_close = obj.find(']', u_open);
-        if (u_open == std::string::npos || u_close == std::string::npos) continue;
+    const size_t arr_open = json.find('[', slots_pos);
+    if (arr_open == std::string::npos) {
+        return;
+    }
+    const size_t arr_close = match_bracket(arr_open);
+    if (arr_close == std::string::npos) {
+        return;
+    }
+    size_t pos = arr_open + 1;
+    while (pos < arr_close) {
+        const size_t obj_open = json.find('{', pos);
+        if (obj_open == std::string::npos || obj_open >= arr_close) {
+            break;
+        }
+        const size_t obj_close = match_bracket(obj_open);
+        if (obj_close == std::string::npos || obj_close > arr_close) {
+            break;
+        }
+        const std::string obj = json.substr(obj_open, obj_close - obj_open + 1);
+        pos = obj_close + 1;
+
+        auto get_num = [&](const std::string& key) -> int {
+            const size_t kp = obj.find(key);
+            if (kp == std::string::npos) {
+                return -1;
+            }
+            const size_t col = obj.find(':', kp);
+            return col == std::string::npos ? -1 : std::atoi(obj.c_str() + col + 1);
+        };
+        const int idx = get_num("\"index\"");
+        const int pad = get_num("\"pad\"");
+        const int id = get_num("\"id\"");
+        if (idx < 0 || idx >= kSlotCount || pad < 1 || pad > kPadCount || id < 0) {
+            continue; // linha invalida: ignora em vez de escrever fora do vetor
+        }
 
         Uid uid{};
-        size_t cur = u_open + 1;
-        for (int k = 0; k < 7; ++k) {
-            cur = obj.find_first_of("0123456789", cur);
-            if (cur == std::string::npos || cur > u_close) break;
-            uid[k] = static_cast<u8>(std::strtoul(obj.c_str() + cur, nullptr, 10));
-            cur = obj.find_first_not_of("0123456789", cur);
+        const size_t uid_pos = obj.find("\"uid\"");
+        if (uid_pos != std::string::npos) {
+            const size_t u_open = obj.find('[', uid_pos);
+            const size_t u_close = u_open == std::string::npos ? std::string::npos : obj.find(']', u_open);
+            if (u_open != std::string::npos && u_close != std::string::npos) {
+                size_t cur = u_open + 1;
+                for (int k = 0; k < 7; ++k) {
+                    cur = obj.find_first_of("0123456789", cur);
+                    if (cur == std::string::npos || cur > u_close) {
+                        break;
+                    }
+                    uid[k] = static_cast<u8>(std::strtoul(obj.c_str() + cur, nullptr, 10));
+                    cur = obj.find_first_not_of("0123456789", cur);
+                }
+            }
         }
-        size_t id_digits = obj.find_first_of("0123456789", obj.find(':', id_pos));
-        if (id_digits == std::string::npos) continue;
-        u32 id = static_cast<u32>(std::strtoul(obj.c_str() + id_digits, nullptr, 10));
 
-        Figure& f = g_figures[pad];
+        std::string fpath;
+        const size_t p_pos = obj.find("\"path\"");
+        if (p_pos != std::string::npos) {
+            const size_t str_open = obj.find('"', obj.find(':', p_pos) + 1);
+            size_t str_close = str_open == std::string::npos ? std::string::npos : obj.find('"', str_open + 1);
+            while (str_close != std::string::npos && obj[str_close - 1] == '\\') {
+                str_close = obj.find('"', str_close + 1);
+            }
+            if (str_close != std::string::npos) {
+                fpath = obj.substr(str_open + 1, str_close - str_open - 1);
+                std::string unesc;
+                for (size_t c = 0; c < fpath.size(); ++c) {
+                    if (fpath[c] == '\\' && c + 1 < fpath.size() && fpath[c + 1] == '\\') {
+                        unesc += '\\';
+                        ++c;
+                    } else {
+                        unesc += fpath[c];
+                    }
+                }
+                fpath = std::move(unesc);
+            }
+        }
+
+        Figure& f = g_figures[idx]; // a POSICAO e' o "index"; o "pad" e' a zona
         f.present = true;
         f.pad = pad;
         f.uid = uid;
-        f.id = id;
-        f.data = BuildTag(uid, id);
-        f.path.clear();
-        log::Tagged("PORTAL", "Restored legacy figure in pad %d (id %u)", pad, id);
+        f.id = static_cast<u32>(id);
+        f.data = BuildTag(uid, static_cast<u32>(id));
+        f.path = fpath;
+        log::Tagged("PORTAL", "Restored figure in slot %d (zone %d, id %u)", idx, pad, id);
     }
 }
 
