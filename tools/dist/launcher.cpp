@@ -177,6 +177,10 @@ struct Status {
 // As pastas e as opcoes (launcher.ini)
 std::wstring g_game_dir, g_patch_dir, g_dlc_dir;
 bool g_opt_fps = true, g_opt_console = false, g_opt_fullscreen = false, g_opt_skip = false, g_opt_overlay = false, g_opt_toypad = false;
+// Toy Pad Remote: servidor HTTP dentro do jogo para controlar o portal pelo telemovel.
+bool g_opt_toypad_remote = false;
+std::wstring g_toypad_remote_port = L"8090";
+std::wstring g_toypad_remote_pin; // vazio = sem PIN
 // 4.0 (Fase 79): multiplayer online. Desligado por padrao: sem isso o jogo nao recebe nenhuma opcao --mp-*.
 bool g_opt_mp = false;
 void WakeMpServer(); // 4.0 (abaixo)
@@ -454,6 +458,9 @@ void SaveSettings() {
     WriteIni(L"pularcenas", g_opt_skip ? L"1" : L"0");
     WriteIni(L"contador", g_opt_overlay ? L"1" : L"0"); // Fase 65
     WriteIni(L"toypad_auto", g_opt_toypad ? L"1" : L"0");
+    WriteIni(L"toypad_remote", g_opt_toypad_remote ? L"1" : L"0");
+    WriteIni(L"remote_port", g_toypad_remote_port);
+    WriteIni(L"remote_pin", g_toypad_remote_pin);
     WriteIni(L"multiplayer", g_opt_mp ? L"1" : L"0"); // 4.0
     WriteIni(L"mp_servidor", g_mp_server);
     WriteIni(L"mp_sala", g_mp_room);
@@ -1183,6 +1190,14 @@ HWND g_names_focus = nullptr;
 constexpr int kNamesW = 440, kNamesH = 430;
 enum NamesId { kNamesSave = 1, kNamesCancel = 2, kNamesEdit = 300 };
 
+// Toy Pad Remote: porta e PIN (o PIN so interessa a quem expoe o servidor fora de casa).
+constexpr int kRemoteW = 460, kRemoteH = 300;
+enum RemoteId { kRemoteSave = 1, kRemoteCancel = 2, kRemoteEdit = 400 };
+HWND g_remote_window = nullptr;
+HWND g_remote_edits[2] = {nullptr, nullptr};
+HWND g_remote_focus = nullptr;
+
+
 LRESULT CALLBACK NamesProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_PAINT: {
@@ -1258,6 +1273,135 @@ LRESULT CALLBACK NamesProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+
+// ---- Toy Pad Remote: janela da porta e do PIN ----
+LRESULT CALLBACK RemoteProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC target = BeginPaint(hwnd, &ps);
+        RECT client;
+        GetClientRect(hwnd, &client);
+        {
+            ui::Buffered buffer(target, client);
+            HBRUSH bg = CreateSolidBrush(ui::kBg);
+            FillRect(buffer.dc, &client, bg);
+            DeleteObject(bg);
+            Gdiplus::Graphics g(buffer.dc);
+            g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+            for (HWND edit : g_remote_edits) {
+                ui::FieldBox(g, hwnd, edit, g_remote_focus == edit);
+            }
+            g.Flush();
+            RECT title{S(28), S(18), S(kRemoteW - 28), S(46)};
+            ui::Text(buffer.dc, ui::T(L"Toy Pad Remote", L"Toy Pad Remote"), title, g_button, ui::kText);
+            RECT hint{S(28), S(48), S(kRemoteW - 28), S(96)};
+            ui::Text(buffer.dc,
+                     ui::T(L"O portal no telemovel, dentro do jogo. Na rede de casa abre "
+                           L"http://<nome-do-PC>:<porta>; com Tailscale, o mesmo link que usa no Cemu.",
+                           L"The portal on your phone, inside the game. On your home network open "
+                           L"http://<pc-name>:<port>; with Tailscale, the same link you use in Cemu."),
+                     hint, g_small, ui::kMuted, DT_LEFT | DT_TOP | DT_WORDBREAK);
+            RECT l1{S(28), S(104), S(kRemoteW - 28), S(122)};
+            ui::Text(buffer.dc, ui::T(L"PORTA", L"PORT"), l1, g_label, ui::kMuted);
+            RECT l2{S(28), S(178), S(kRemoteW - 28), S(196)};
+            ui::Text(buffer.dc, ui::T(L"PIN (opcional)", L"PIN (optional)"), l2, g_label, ui::kMuted);
+            RECT warn{S(28), S(238), S(kRemoteW - 200), S(272)};
+            ui::Text(buffer.dc,
+                     ui::T(L"Fica visivel na rede local. Sem PIN, qualquer aparelho dessa rede pode mexer no portal;"
+                           L" com Tailscale nao e preciso PIN.",
+                           L"Visible on the local network. Without a PIN, any device on that network can use the pad;"
+                           L" with Tailscale a PIN is not needed."),
+                     warn, g_small, ui::kMuted, DT_LEFT | DT_TOP | DT_WORDBREAK);
+        }
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_DRAWITEM:
+        ui::DrawButton(reinterpret_cast<const DRAWITEMSTRUCT*>(lp));
+        return TRUE;
+    case WM_CTLCOLOREDIT: {
+        HDC dc = reinterpret_cast<HDC>(wp);
+        SetBkColor(dc, ui::kField);
+        SetTextColor(dc, ui::kText);
+        return reinterpret_cast<LRESULT>(g_field_brush);
+    }
+    case WM_COMMAND:
+        if (LOWORD(wp) >= kRemoteEdit && LOWORD(wp) < kRemoteEdit + 2 && (HIWORD(wp) == EN_SETFOCUS || HIWORD(wp) == EN_KILLFOCUS)) {
+            g_remote_focus = HIWORD(wp) == EN_SETFOCUS ? reinterpret_cast<HWND>(lp) : nullptr;
+            InvalidateRect(hwnd, nullptr, FALSE);
+        } else if (LOWORD(wp) == kRemoteSave) {
+            const std::wstring port = GetText(g_remote_edits[0]);
+            if (!port.empty()) {
+                g_toypad_remote_port = port;
+            }
+            g_toypad_remote_pin = GetText(g_remote_edits[1]);
+            SaveSettings();
+            AppendLog(ui::T(L"Toy Pad Remote: porta ", L"Toy Pad Remote: port ") + g_toypad_remote_port +
+                      (g_toypad_remote_pin.empty() ? ui::T(L", sem PIN", L", no PIN") : ui::T(L", com PIN", L", with PIN")));
+            DestroyWindow(hwnd);
+        } else if (LOWORD(wp) == kRemoteCancel) {
+            DestroyWindow(hwnd);
+        }
+        return 0;
+    case WM_CLOSE:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        EnableWindow(g_main, TRUE);
+        SetForegroundWindow(g_main);
+        g_remote_window = nullptr;
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+void OpenRemoteDialog() {
+    if (g_remote_window) {
+        SetForegroundWindow(g_remote_window);
+        return;
+    }
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc{sizeof(wc)};
+        wc.lpfnWndProc = RemoteProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        wc.hbrBackground = g_bg_brush;
+        wc.hIcon = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(1));
+        wc.lpszClassName = L"LegoDimensionsPcToypadRemote";
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+    const DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
+    RECT size{0, 0, S(kRemoteW), S(kRemoteH)};
+    AdjustWindowRect(&size, style, FALSE);
+    RECT owner;
+    GetWindowRect(g_main, &owner);
+    const int w = size.right - size.left, h = size.bottom - size.top;
+    g_remote_window = CreateWindowExW(WS_EX_DLGMODALFRAME, L"LegoDimensionsPcToypadRemote",
+                                      ui::T(L"Toy Pad Remote", L"Toy Pad Remote"), style,
+                                      owner.left + ((owner.right - owner.left) - w) / 2,
+                                      owner.top + ((owner.bottom - owner.top) - h) / 2, w, h, g_main, nullptr,
+                                      GetModuleHandleW(nullptr), nullptr);
+    ui::DarkTitle(g_remote_window);
+    const std::wstring values[2] = {g_toypad_remote_port, g_toypad_remote_pin};
+    const wchar_t* cues[2] = {L"8090", ui::T(L"vazio = sem PIN", L"empty = no PIN")};
+    for (int i = 0; i < 2; ++i) {
+        g_remote_edits[i] = ui::Edit(g_remote_window, S(28), S(124.0f + i * 74), S(kRemoteW - 56), S(24), kRemoteEdit + i, g_font);
+        SendMessageW(g_remote_edits[i], EM_LIMITTEXT, i == 0 ? 5 : 32, 0);
+        SetWindowTextW(g_remote_edits[i], values[i].c_str());
+        SendMessageW(g_remote_edits[i], EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(cues[i]));
+    }
+    ui::Button(g_remote_window, ui::T(L"Cancelar", L"Cancel"), ui::Style::kSecondary, S(kRemoteW - 316), S(kRemoteH - 58), S(130), S(44), kRemoteCancel, g_button);
+    ui::Button(g_remote_window, ui::T(L"Salvar", L"Save"), ui::Style::kPrimary, S(kRemoteW - 176), S(kRemoteH - 58), S(148), S(44), kRemoteSave, g_button);
+    EnableWindow(g_main, FALSE);
+    ShowWindow(g_remote_window, SW_SHOW);
+    SetFocus(g_remote_edits[0]);
 }
 
 // ---- 4.0: janela da sala do multiplayer ----
@@ -1612,6 +1756,15 @@ void RunGame() {
     if (g_opt_overlay) {
         command += L" --stats-overlay"; // Fase 65: contador de FPS / info
     }
+    if (g_opt_toypad_remote) { // portal no telemovel, servidor dentro do jogo
+        command += L" --toypad-remote";
+        if (!g_toypad_remote_port.empty()) {
+            command += L" --toypad-remote-port " + g_toypad_remote_port;
+        }
+        if (!g_toypad_remote_pin.empty()) {
+            command += L" --toypad-remote-pin " + g_toypad_remote_pin;
+        }
+    }
     if (g_opt_mp) { // 4.0: multiplayer online (so com a caixa ligada)
         if (g_mp_server.empty() || g_mp_room.empty()) {
             AppendLog(ui::T(L"Multiplayer: falta o código da sala ou o servidor (Configurações > Jogo > Sala do multiplayer). Abrindo sem multiplayer.",
@@ -1635,6 +1788,14 @@ void RunGame() {
     command += L" --hitch-log";
     if (GetEnvironmentVariableW(L"LD_LAUNCHER_SEM_JOGO", nullptr, 0)) { // teste do launcher: faz tudo menos abrir o jogo
         AppendLog(L"[teste] " + command);
+        // teste automatico: a linha de comando tambem vai para um arquivo (o log da janela so vive em memoria)
+        std::error_code ec_cmd;
+        fs::create_directories(g_root / L"build", ec_cmd);
+        std::ofstream cmd_out(g_root / L"build" / L"launcher_cmd.txt", std::ios::binary | std::ios::trunc);
+        if (cmd_out) {
+            const std::string utf8 = WideToUtf8(command);
+            cmd_out.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
+        }
         return;
     }
     const bool console = g_opt_console;
@@ -2568,6 +2729,7 @@ struct Row {
 
 std::wstring OnOff(bool on) { return on ? ui::T(L"Ligado", L"On") : ui::T(L"Desligado", L"Off"); }
 void OpenNamesDialog();
+void OpenRemoteDialog();
 void OpenMpDialog(); // 4.0
 void OpenMpPlayDialog(); // 4.4.26: "Jogar multiplayer" no menu
 void AskShaders();       // 4.4.26: pre-compilar shaders/pipelines
@@ -2734,6 +2896,18 @@ std::vector<Row> Rows() {
                     toggle(g_opt_skip)});
     rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Abrir o LegoToypad com o jogo", L"Start LegoToypad with the game"),
                     ui::T(L"O portal na tela (tools\\LegoToypad.exe).", L"The on-screen portal (tools\\LegoToypad.exe)."), OnOff(g_opt_toypad), toggle(g_opt_toypad)});
+    rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Toy Pad Remote (telemovel)", L"Toy Pad Remote (phone)"),
+                    ui::T(L"O portal no telemovel, dentro do jogo. Visivel na rede local: abre http://<nome-do-PC>:8090. "
+                          L"Com Tailscale e o mesmo link do Cemu.",
+                          L"The portal on your phone, inside the game. Visible on the local network: open http://<pc-name>:8090. "
+                          L"With Tailscale it is the same link as in Cemu."),
+                    OnOff(g_opt_toypad_remote), toggle(g_opt_toypad_remote)});
+    rows.push_back({kTabGame, RowKind::kAction, ui::T(L"Porta e PIN do remote", L"Remote port and PIN"),
+                    ui::T(L"Porta do servidor (8090) e PIN opcional, para quem expoe o servidor fora de casa. Enter: editar.",
+                          L"Server port (8090) and optional PIN, for whoever exposes the server outside the home. Enter: edit."),
+                    ui::T(L"porta ", L"port ") + g_toypad_remote_port +
+                        (g_toypad_remote_pin.empty() ? ui::T(L", sem PIN", L", no PIN") : ui::T(L", com PIN", L", with PIN")),
+                    [](int) { OpenRemoteDialog(); }});
     rows.push_back({kTabGame, RowKind::kChoice, ui::T(L"Multiplayer online (alfa)", L"Online multiplayer (alpha)"),
                     ui::T(L"Amigos da mesma sala aparecem no seu jogo. Desligado: nada muda.",
                           L"Friends in the same room show up in your game. Off: nothing changes."),
@@ -3680,6 +3854,12 @@ void LoadSettings() {
     g_opt_console = ReadIni(L"console", L"0") == L"1";
     g_opt_skip = ReadIni(L"pularcenas", L"0") == L"1";
     g_opt_toypad = ReadIni(L"toypad_auto", L"0") == L"1";
+    g_opt_toypad_remote = ReadIni(L"toypad_remote", L"0") == L"1";
+    g_toypad_remote_port = ReadIni(L"remote_port", L"8090");
+    if (g_toypad_remote_port.empty()) {
+        g_toypad_remote_port = L"8090";
+    }
+    g_toypad_remote_pin = ReadIni(L"remote_pin", L"");
     g_opt_mp = ReadIni(L"multiplayer", L"0") == L"1"; // 4.0
     g_mp_server = ReadIni(L"mp_servidor", kDefaultMpServer);
     if (g_mp_server.empty()) g_mp_server = kDefaultMpServer;
@@ -4359,6 +4539,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     EnsureTrophyIcons(); // 3.0
     ShowWindow(g_main, show);
     if (GetEnvironmentVariableW(L"LD_LAUNCHER_ABRIR_MP", nullptr, 0)) OpenMpDialog(); // teste da janela da sala
+    // teste: entra em jogo sozinho (com LD_LAUNCHER_SEM_JOGO so registra a linha de comando)
+    if (GetEnvironmentVariableW(L"LD_LAUNCHER_PLAY", nullptr, 0)) {
+        Activate(kHotPlay); // igual a clicar JOGAR
+    }
     if (const std::wstring custom_repo = ReadIni(L"repo", L""); !custom_repo.empty()) {
         SetEnvironmentVariableW(L"LD_REPO", custom_repo.c_str());
     }

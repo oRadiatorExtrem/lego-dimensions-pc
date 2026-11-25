@@ -143,6 +143,38 @@ bool IsLoopbackName(const std::string& host) {
     return host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "0.0.0.0";
 }
 
+// Nome da maquina em minusculas, como o browser o escreve. Com o Tailscale ligado e o MagicDNS
+// ativo, "http://<nome>:8090" resolve para o IP da rede Tailscale e e o mesmo link que se usa no
+// Cemu. Vazio se nao der para obter.
+std::string MachineName() {
+    char buffer[256] = {};
+#ifdef _WIN32
+    DWORD size = static_cast<DWORD>(sizeof(buffer));
+    if (!GetComputerNameA(buffer, &size)) {
+        return {};
+    }
+#else
+    if (gethostname(buffer, sizeof(buffer)) != 0) {
+        return {};
+    }
+#endif
+    std::string name = buffer;
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return name;
+}
+
+bool EqualsIgnoreCase(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) {
+        return false;
+    }
+    for (size_t i = 0; i < a.size(); ++i) {
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 #ifdef _WIN32
 // Primeiro IPv4 de um adaptador ligado, que nao seja loopback nem APIPA. Enderecos Tailscale
 // (100.64.0.0/10) sao preferidos no fim, como sufixo do URL anunciado.
@@ -202,6 +234,7 @@ struct Core::Impl {
     std::string url;
     int bound_port = 0;
     std::string boot_id;
+    std::string machine_name; // anunciado e aceite no Origin (link do Tailscale)
 
     // Estado do servidor (alimentado pelos comandos do jogo). Ordem de locks: este `mutex` e o
     // primeiro; o do anfitriao vem depois e nunca os dois ao mesmo tempo (ver Snapshot).
@@ -656,10 +689,13 @@ struct Core::Impl {
             return true;
         }
         const std::string request_host = HostOfHeader(req.get_header_value("Host"));
-        if (!request_host.empty() && host == request_host) {
+        if (!request_host.empty() && EqualsIgnoreCase(host, request_host)) {
             return true; // o proprio web app, servido por nos
         }
-        // o URL anunciado (IP do adaptador de rede) tambem e aceite
+        // o nome da maquina (link do Tailscale / MagicDNS) e os IPs anunciados tambem sao aceites
+        if (!machine_name.empty() && EqualsIgnoreCase(host, machine_name)) {
+            return true;
+        }
         return !url.empty() && host == HostOfOrigin(url);
     }
 
@@ -1138,12 +1174,20 @@ bool Core::Start(ToypadHost* host, const Config& config, std::string& err) {
         return false;
     }
     const std::string port = std::to_string(m_impl->bound_port);
+    m_impl->machine_name = MachineName();
     std::string lan = LanAddress(false);
     if (lan.empty()) {
         lan = "127.0.0.1";
     }
-    m_impl->url = "http://" + lan + ":" + port;
-    if (const std::string ts = LanAddress(true); !ts.empty()) {
+    // O primeiro link e o nome da maquina: com o Tailscale/MagicDNS ativo e o mesmo endereco que se
+    // usa no Cemu (http://<nome>:8090), e nao muda quando a rede local muda de IP.
+    const std::string ts = LanAddress(true);
+    m_impl->url = m_impl->machine_name.empty() ? "http://" + lan + ":" + port
+                                               : "http://" + m_impl->machine_name + ":" + port;
+    if (!m_impl->machine_name.empty()) {
+        m_impl->url += "  |  rede local: http://" + lan + ":" + port;
+    }
+    if (!ts.empty()) {
         m_impl->url += "  |  Tailscale: http://" + ts + ":" + port;
     }
     if (config.announce_in_log && host) {
