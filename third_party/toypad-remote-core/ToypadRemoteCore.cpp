@@ -255,7 +255,13 @@ struct Core::Impl {
     uint64_t version = 1;
     std::array<LedState, kPadCount> leds{};
     bool awake = false;
-    int selected = -1;
+    int selected = -1;                       // jogador 1 (compatibilidade com o campo "sel")
+    std::array<int, 4> selections{{-1, -1, -1, -1}}; // selecao de cada jogador, para o co-op
+    // Serializa as mutacoes do pad. O intervalo de 500 ms entre tirar e por uma figura corre FORA do
+    // lock do anfitriao, por isso dois pedidos simultaneos (dois telemoveis, ou telemovel + atalho de
+    // co-op) podiam intercalar-se e deixar o portal num estado que o jogo nao ve. Com este lock, uma
+    // operacao de cada vez; a segunda recebe 409 e o utilizador tenta outra vez.
+    std::mutex pad_op;
 
     // ---------------------------------------------------------------- estado
     void Bump() { // caller holds mutex
@@ -268,12 +274,14 @@ struct Core::Impl {
         std::array<LedState, kPadCount> leds_copy;
         bool awake_copy = false;
         int selected_copy = -1;
+        std::array<int, 4> selections_copy{};
         uint64_t version_copy = 0;
         {
             std::lock_guard lock(mutex);
             leds_copy = leds;
             awake_copy = awake;
             selected_copy = selected;
+            selections_copy = selections;
             version_copy = version;
         }
         // 2) estado do pad: o anfitriao tranca o que precisar e larga antes de voltar
@@ -293,6 +301,14 @@ struct Core::Impl {
         j += snap.awake ? "true" : "false";
         j += ",\"sel\":";
         j += std::to_string(selected_copy);
+        j += ",\"sels\":[";
+        for (int i = 0; i < 4; ++i) {
+            if (i) {
+                j += ',';
+            }
+            j += std::to_string(selections_copy[static_cast<size_t>(i)]);
+        }
+        j += ']';
         j += ",\"slots\":[";
         for (int i = 0; i < kSlotCount; ++i) {
             if (i) {
@@ -684,6 +700,12 @@ struct Core::Impl {
 
     void Ok(httplib::Response& res) const { res.set_content("{\"ok\":true}", "application/json"); }
 
+    // Uma operacao de pad de cada vez (ver Impl::pad_op). Devolve false e responde 409 se ja houver
+    // uma em curso: melhor do que duas acoes a intercalarem-se e o portal ficar inconsistente.
+    void Busy(httplib::Response& res) const {
+        Fail(res, 409, "o portal esta ocupado com outra acao; tenta outra vez");
+    }
+
     static std::optional<int> SlotParam(const httplib::Request& req, const char* key) {
         if (!req.has_param(key)) {
             return std::nullopt;
@@ -712,6 +734,26 @@ struct Core::Impl {
             return true;
         }
         return !url.empty() && host == HostOfOrigin(url);
+    }
+
+    // Token + PIN verificados JA na rota (depois de o httplib ler o corpo). Se fossem recusados no
+    // pre_routing_handler, o corpo ficava por ler, o servidor fechava a ligacao com dados pendentes e
+    // o browser via um erro de rede em vez do 403 em JSON.
+    bool Authorized(const httplib::Request& req, httplib::Response& res) const {
+        const std::string origin = req.get_header_value("Origin");
+        if (!origin.empty() && !OriginAllowed(req, origin)) {
+            Fail(res, 403, "origem nao permitida");
+            return false;
+        }
+        if (req.get_header_value(kHeaderToken) != "1") {
+            Fail(res, 403, "falta o cabecalho X-TPR");
+            return false;
+        }
+        if (!PinOk(req)) {
+            Fail(res, 401, "PIN necessario");
+            return false;
+        }
+        return true;
     }
 
     bool PinOk(const httplib::Request& req) const {
@@ -807,22 +849,10 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
             return httplib::Server::HandlerResponse::Handled;
         }
         const std::string origin = req.get_header_value("Origin");
-        if (!origin.empty() && !OriginAllowed(req, origin)) {
+        if (req.method != "POST" && !origin.empty() && !OriginAllowed(req, origin)) {
             res.status = 403;
             res.set_content("{\"error\":\"origin not allowed\"}", "application/json");
             return httplib::Server::HandlerResponse::Handled;
-        }
-        if (req.method == "POST") {
-            if (req.get_header_value(kHeaderToken) != "1") {
-                res.status = 403;
-                res.set_content("{\"error\":\"missing X-TPR header\"}", "application/json");
-                return httplib::Server::HandlerResponse::Handled;
-            }
-            if (!PinOk(req)) {
-                res.status = 401;
-                res.set_content("{\"error\":\"PIN required\"}", "application/json");
-                return httplib::Server::HandlerResponse::Handled;
-            }
         }
         return httplib::Server::HandlerResponse::Unhandled;
     });
@@ -935,6 +965,9 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/figures/fav", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
         const std::string file = req.get_param_value("file");
         if (!ValidFigureName(file)) {
             return Fail(res, 400, "invalid file name");
@@ -950,6 +983,9 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/figures/rename", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
         const std::string file = req.get_param_value("file");
         const std::string to = SanitizeName(req.get_param_value("to")) + ".bin";
         const fs::path from = FigurePath(file);
@@ -973,6 +1009,9 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/figures/delete", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
         const std::string file = req.get_param_value("file");
         const fs::path from = FigurePath(file);
         if (from.empty()) {
@@ -997,6 +1036,14 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/place", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
+        std::unique_lock<std::mutex> pad_guard(pad_op, std::try_to_lock);
+        if (!pad_guard.owns_lock()) {
+            Busy(res);
+            return;
+        }
         const auto slot = SlotParam(req, "slot");
         if (!slot || !req.has_param("file")) {
             return Fail(res, 400, "slot (0-6) and file required");
@@ -1011,6 +1058,14 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/remove", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
+        std::unique_lock<std::mutex> pad_guard(pad_op, std::try_to_lock);
+        if (!pad_guard.owns_lock()) {
+            Busy(res);
+            return;
+        }
         const auto slot = SlotParam(req, "slot");
         if (!slot) {
             return Fail(res, 400, "slot (0-6) required");
@@ -1022,6 +1077,14 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/zone", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
+        std::unique_lock<std::mutex> pad_guard(pad_op, std::try_to_lock);
+        if (!pad_guard.owns_lock()) {
+            Busy(res);
+            return;
+        }
         const auto slot = SlotParam(req, "slot");
         const int pad = std::atoi(req.get_param_value("pad").c_str());
         if (!slot || pad < 1 || pad > kPadCount) {
@@ -1037,6 +1100,14 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/move", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
+        std::unique_lock<std::mutex> pad_guard(pad_op, std::try_to_lock);
+        if (!pad_guard.owns_lock()) {
+            Busy(res);
+            return;
+        }
         const auto from = SlotParam(req, "from");
         const auto to = SlotParam(req, "to");
         if (!from || !to) {
@@ -1062,6 +1133,14 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/create", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
+        std::unique_lock<std::mutex> pad_guard(pad_op, std::try_to_lock);
+        if (!pad_guard.owns_lock()) {
+            Busy(res);
+            return;
+        }
         if (!req.has_param("id")) {
             return Fail(res, 400, "id required");
         }
@@ -1116,6 +1195,9 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/loadouts/save", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
         std::string name = req.get_param_value("name");
         name.erase(std::remove_if(name.begin(), name.end(), [](char c) { return c == '\t' || c == '\r' || c == '\n'; }),
                    name.end());
@@ -1140,6 +1222,14 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/loadouts/apply", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
+        std::unique_lock<std::mutex> pad_guard(pad_op, std::try_to_lock);
+        if (!pad_guard.owns_lock()) {
+            Busy(res);
+            return;
+        }
         const size_t i = static_cast<size_t>(std::atoi(req.get_param_value("i").c_str()));
         const auto list = ReadLoadouts();
         if (i >= list.size()) {
@@ -1153,6 +1243,9 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/loadouts/delete", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
         const size_t i = static_cast<size_t>(std::atoi(req.get_param_value("i").c_str()));
         auto list = ReadLoadouts();
         if (i >= list.size()) {
@@ -1164,6 +1257,9 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     });
 
     srv.Post("/api/loadouts/up", [this](const httplib::Request& req, httplib::Response& res) {
+        if (!Authorized(req, res)) {
+            return;
+        }
         const size_t i = static_cast<size_t>(std::atoi(req.get_param_value("i").c_str()));
         auto list = ReadLoadouts();
         if (i == 0 || i >= list.size()) {
@@ -1340,10 +1436,20 @@ int Core::BlinkingZone() {
     return 0;
 }
 
-void Core::SetSelected(int slot) {
+void Core::SetSelected(int slot) { SetSelectedForPlayer(0, slot); }
+
+void Core::SetSelectedForPlayer(int player, int slot) {
+    if (player < 0 || player > 3) {
+        return;
+    }
     std::lock_guard lock(m_impl->mutex);
-    if (m_impl->selected != slot) {
+    bool changed = m_impl->selections[static_cast<size_t>(player)] != slot;
+    m_impl->selections[static_cast<size_t>(player)] = slot;
+    if (player == 0) {
+        changed |= m_impl->selected != slot;
         m_impl->selected = slot;
+    }
+    if (changed) {
         m_impl->Bump();
     }
 }

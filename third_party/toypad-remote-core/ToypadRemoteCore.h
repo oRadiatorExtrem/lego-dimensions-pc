@@ -71,8 +71,10 @@ class Core {
     // Toy Pad fisico, atalho no comando). Unico ponto de notificacao: gera evento SSE.
     void NotifyPortalChanged();
 
-    // Posicao selecionada pelos atalhos no comando (-1 = nenhuma).
+    // Posicao selecionada pelos atalhos no comando (-1 = nenhuma). SetSelected e' o jogador 1
+    // (compatibilidade); em co-op cada jogador tem a sua.
     void SetSelected(int slot);
+    void SetSelectedForPlayer(int player, int slot); // player 0..3
 
     // ---------------------------------------------------------------- atalhos no comando
     // Quantos loadouts existem (para os atalhos A/B/X/Y poderem mostrar o nome).

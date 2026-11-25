@@ -55,14 +55,6 @@ void Toast(const std::string& text) {
     std::fflush(stdout);
 }
 
-int OccupiedCount() {
-    const auto slots = toypad::Slots();
-    int count = 0;
-    for (const auto& slot : slots) {
-        count += slot.present ? 1 : 0;
-    }
-    return count;
-}
 
 void CycleSelection(PlayerState& state, int direction) {
     const auto slots = toypad::Slots();
@@ -135,7 +127,7 @@ void ApplyLoadoutShortcut(int index) {
     }
 }
 
-void ZoneShortcut(PlayerState& state, int pad, const char* what) {
+void ZoneShortcut(int player, PlayerState& state, int pad, const char* what) {
     if (state.selected < 0) {
         Toast("nenhuma figura escolhida (segura TouchPad e carrega em Baixo)");
         return;
@@ -147,10 +139,10 @@ void ZoneShortcut(PlayerState& state, int pad, const char* what) {
     }
     state.selected = moved;
     Toast(std::string("para ") + what + ": " + SlotLabel(moved));
-    ::toypad_remote::Core::Instance().SetSelected(moved);
+    ::toypad_remote::Core::Instance().SetSelectedForPlayer(player, moved);
 }
 
-void BlinkingShortcut(PlayerState& state) {
+void BlinkingShortcut(int player, PlayerState& state) {
     if (state.selected < 0) {
         Toast("nenhuma figura escolhida");
         return;
@@ -161,31 +153,31 @@ void BlinkingShortcut(PlayerState& state) {
         return;
     }
     static const char* const kNames[] = {"centro", "esquerda", "direita"};
-    ZoneShortcut(state, zone, kNames[zone - 1]);
+    ZoneShortcut(player, state, zone, kNames[zone - 1]);
 }
 
-void HandlePress(PlayerState& state, u32 pressed) {
+void HandlePress(int player, PlayerState& state, u32 pressed) {
     if (pressed & (kDown | kR1)) {
         CycleSelection(state, 1);
         Toast("escolhida: " + SlotLabel(state.selected));
-        ::toypad_remote::Core::Instance().SetSelected(state.selected);
+        ::toypad_remote::Core::Instance().SetSelectedForPlayer(player, state.selected);
         return;
     }
     if (pressed & kL1) {
         CycleSelection(state, -1);
         Toast("escolhida: " + SlotLabel(state.selected));
-        ::toypad_remote::Core::Instance().SetSelected(state.selected);
+        ::toypad_remote::Core::Instance().SetSelectedForPlayer(player, state.selected);
         return;
     }
     // zonas: esquerda, centro, direita (o mesmo desenho do portal no ecra)
     const int zone = (pressed & kLeft) ? 2 : (pressed & kUp) ? 1 : (pressed & kRight) ? 3 : 0;
     if (zone) {
         static const char* const kNames[] = {"centro", "esquerda", "direita"};
-        ZoneShortcut(state, zone, kNames[zone - 1]);
+        ZoneShortcut(player, state, zone, kNames[zone - 1]);
         return;
     }
     if (pressed & kCross) {
-        BlinkingShortcut(state); // TODO #1 do ToyPad-Remote: para a zona que o jogo esta a piscar
+        BlinkingShortcut(player, state); // TODO #1 do ToyPad-Remote: para a zona que o jogo esta a piscar
         return;
     }
     // loadouts 1..4
@@ -215,7 +207,7 @@ u32 HandleGamepad(int player, u32 buttons) {
         return buttons;
     }
     if (pressed) {
-        HandlePress(state, pressed);
+        HandlePress(player, state, pressed);
     }
     return 0; // com o modificador em baixo o jogo nao ve os botoes
 }

@@ -56,14 +56,14 @@ h2 button{font-size:12px;padding:7px 10px;text-transform:none;letter-spacing:0}
 .zone.flash{animation:flash var(--d,.4s) steps(1) var(--n,6)}
 .zone.rand{--led:255,0,0;animation:rainbow 2.5s linear var(--n,2)}
 #sheet,#menu{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-radius:18px 18px 0 0;box-shadow:0 -10px 40px #000a;transform:translateY(105%);transition:transform .2s ease-out;z-index:10;padding:10px 12px calc(12px + env(safe-area-inset-bottom))}
-#sheet{top:12vh;display:flex;flex-direction:column}
+#sheet{top:12vh;display:flex;flex-direction:column;overscroll-behavior:contain}
 #sheet.open,#menu.open{transform:none}
 #shade{position:fixed;inset:0;background:#0008;opacity:0;pointer-events:none;transition:opacity .2s;z-index:9}
 #shade.open{opacity:1;pointer-events:auto}
 .grab{width:40px;height:4px;border-radius:2px;background:#444a5a;margin:0 auto 10px}
 .tabs{display:flex;gap:6px;margin-bottom:8px}
 .tabs button{flex:1}
-button{font:inherit;color:var(--fg);background:var(--card2);border:0;border-radius:10px;padding:11px 12px;cursor:pointer}
+button{font:inherit;color:var(--fg);background:var(--card2);border:0;border-radius:10px;padding:11px 12px;cursor:pointer;touch-action:manipulation}
 button.on{background:var(--acc);color:#111;font-weight:700}
 button.danger{color:var(--bad)}
 #q{width:100%;font:inherit;color:var(--fg);background:var(--bg);border:1px solid #333847;border-radius:10px;padding:11px 12px;margin-bottom:8px;outline:none;user-select:text}
@@ -77,8 +77,11 @@ button.danger{color:var(--bad)}
 .item .li{width:36px;height:36px;object-fit:contain;flex:none}
 .item .nm{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
 .item .nm small{text-align:left}
-.item .ic{background:none;padding:8px 7px;font-size:17px;color:var(--dim)}
+.item .ic{background:none;padding:8px 7px;font-size:17px;color:var(--dim);min-width:44px;min-height:44px}
 .item .ic.star{color:var(--acc)}
+.item .li.txt{display:flex;align-items:center;justify-content:center;border-radius:8px;background:var(--card2);color:var(--dim);font-size:13px;font-weight:700}
+.who{position:absolute;bottom:3px;left:4px;font-size:10px;font-weight:700;line-height:1;padding:2px 4px;border-radius:6px;background:var(--acc);color:#241c00}
+.who.j2{background:#6ec1ff;color:#062033}.who.j3{background:#b98cff;color:#1a0330}.who.j4{background:#7ce08a;color:#03220a}
 .chips{display:flex;gap:6px;overflow-x:auto;padding:4px 4px 8px;scrollbar-width:none}
 .chips button{flex:none;font-size:12px;padding:7px 11px;border-radius:99px}
 .chips button.on{background:var(--acc);color:#111;font-weight:700}
@@ -144,7 +147,7 @@ const byId = new Map();
 for (const [id, name, w, ab] of C.chars) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: false });
 for (const [id, name, w, ab] of C.vehicles) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: true });
 
-let state = null, figures = [], target = null, moving = null, tab = "mine", worldFilter = null;
+let state = null, figures = [], target = null, moving = null, tab = "mine", worldFilter = null, kindFilter = "all";
 let autoSheetDone = false; // a biblioteca abre sozinha uma vez, quando o pad esta vazio
 
 // ---- api
@@ -219,6 +222,15 @@ function render() {
     el.textContent = "";
     if (img) { const i = document.createElement("img"); i.src = img; i.className = "thumb"; i.alt = ""; el.append(i, document.createElement("br")); }
     el.append(s ? slotLabel(s) : "+");
+    // co-op: um distintivo por jogador que escolheu esta figura (sels vem do nucleo, por jogador)
+    const index = +el.dataset.slot;
+    (state.sels || []).forEach((slot, player) => {
+      if (slot !== index) return;
+      const badge = document.createElement("span");
+      badge.className = "who" + (player ? " j" + (player + 1) : "");
+      badge.textContent = "J" + (player + 1);
+      el.append(badge);
+    });
   });
   renderLeds(state.leds);
   document.querySelectorAll("#pad .zone").forEach((zone) => {
@@ -376,7 +388,9 @@ function renderList() {
     for (const f of rows) {
       const used = onPad.has(f.file);
       const pic = (window.IMAGES || {})[f.id];
-      const d = add(`${pic ? `<img class="li" src="${pic}" alt="">` : `<span class="li"></span>`}<span class="nm">${esc(label(f))}<small>${used ? "no pad · tocar para mover" : esc(world(f))}</small></span>
+      // sem imagem: as iniciais do nome do catalogo em vez de um quadrado vazio
+      const initials = (byId.get(f.id)?.name || label(f)).split(/\s+/).map((w) => w[0] || "").join("").slice(0, 2).toUpperCase();
+      const d = add(`${pic ? `<img class="li" src="${pic}" alt="">` : `<span class="li txt">${esc(initials)}</span>`}<span class="nm">${esc(label(f))}<small>${used ? "no pad · tocar para mover" : esc(world(f))}</small></span>
         <button class="ic${f.fav ? " star" : ""}" title="Favorita">${f.fav ? "★" : "☆"}</button>
         <button class="ic" title="Mudar o nome">✎</button><button class="ic" title="Apagar">🗑</button>`,
         "item" + (used ? " used" : ""),
@@ -395,7 +409,30 @@ function renderList() {
       };
     }
   } else {
-    const section = (title, rows) => {
+    // Filtro por tipo. Os "gadgets" nao vem marcados no catalogo: quem os quiser separar poe uma
+    // lista de ids em window.GADGETS (o chip aparece sozinho quando houver algum), sem tocar aqui.
+    const gadgets = window.GADGETS || new Set();
+    const kinds = [
+      ["all", "Todos"],
+      ["char", "Personagens"],
+      ["veh", "Veículos"],
+      ["gad", "Gadgets"],
+    ].filter(([key]) => key !== "gad" || gadgets.size);
+    if (kinds.length > 1) {
+      const chips = add("", "chips");
+      for (const [key, text] of kinds) {
+        const chip = document.createElement("button");
+        chip.textContent = text;
+        if (kindFilter === key) chip.className = "on";
+        chip.onclick = () => { kindFilter = key; renderList(); };
+        chips.appendChild(chip);
+      }
+    }
+    const section = (title, rows, kind) => {
+      // "gad" e' um subconjunto dos veiculos: filtra pelo conjunto window.GADGETS
+      const want = kindFilter === "gad" ? "veh" : kindFilter;
+      if (want !== "all" && want !== kind) return;
+      if (kindFilter === "gad") rows = rows.filter(([id]) => gadgets.has(id));
       rows = rows.filter(([, n, w, ab, owner]) => match(n, C.worlds[w], ab, owner));
       if (!rows.length) return;
       add(title, "sec");
@@ -412,8 +449,8 @@ function renderList() {
         });
       }
     };
-    section("Personagens", C.chars);
-    section("Veículos e gadgets", C.vehicles);
+    section("Personagens", C.chars, "char");
+    section("Veículos e gadgets", C.vehicles, "veh");
     if (!list.children.length) add("Nada encontrado", "empty-msg");
   }
   list.scrollTop = 0;
