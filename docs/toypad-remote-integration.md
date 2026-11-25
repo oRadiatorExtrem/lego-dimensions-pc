@@ -16,7 +16,12 @@ Estado: **F0, F1 e F2 concluídos.**
 `http://<nome-da-maquina>:8090` — com Tailscale é exactamente o mesmo link do Cemu
 (`http://legion5-15arh05:8090`), com ou sem maiúsculas no `Origin`.
 
-Falta F4 (biblioteca/upgrades), F5-F8.
+**F4** concluído: `vehicle_upgrades.tsv` (239 veículos/gadgets, páginas 35/37 extraídas dos
+nossos próprios dumps — só números), `catalog_data.h` (nomes e mundos, do LD-ToyPad-Emulator,
+MIT) e ícones servidos de `assets/toypad_remote/img` com `/images.js` gerado. O mesmo ícone do
+Cemu, sem o projeto distribuir imagens.
+
+Falta F5 (loadouts por botão), F6 (atalhos no comando), F7 (endurecimento) e F8.
 
 ---
 
