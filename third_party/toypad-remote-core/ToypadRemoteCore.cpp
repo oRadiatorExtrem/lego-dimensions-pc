@@ -48,6 +48,11 @@ namespace {
 // (animacao de zonas); sem isto cada cliente recebia dezenas de JSON por segundo.
 constexpr auto kSseMinInterval = std::chrono::milliseconds(50);
 constexpr auto kSseKeepAlive = std::chrono::seconds(10);
+// Cada stream SSE segura uma thread do servidor. O tecto e' menor do que o pool de proposito:
+// sobra sempre thread para os pedidos normais (place/remove/state). Sem isto, varias abas
+// esquecidas no /api/events deixavam o telemovel "a rodar" ao colocar uma figura.
+constexpr int kMaxSseClients = 6;
+constexpr int kServerThreads = 12;
 constexpr auto kPickupDelay = std::chrono::milliseconds(500);
 constexpr const char* kHeaderToken = "X-TPR";
 constexpr const char* kHeaderPin = "X-TPR-Pin";
@@ -139,6 +144,11 @@ std::string HostOfHeader(const std::string& host_header) {
     }
     const size_t colon = host_header.find(':');
     return colon == std::string::npos ? host_header : host_header.substr(0, colon);
+}
+
+bool AcceptsGzip(const httplib::Request& req) {
+    const std::string encodings = req.get_header_value("Accept-Encoding");
+    return encodings.find("gzip") != std::string::npos;
 }
 
 bool IsLoopbackName(const std::string& host) {
@@ -751,14 +761,21 @@ struct Core::Impl {
                 }
             }
         }
-        // 2) embutido
+        // 2) embutido (com a variante gzip, quando existe e o cliente a aceita)
         for (unsigned int i = 0; i < embedded::kAssetCount; ++i) {
-            if (path == embedded::kAssets[i].path) {
-                res.set_content(reinterpret_cast<const char*>(embedded::kAssets[i].data), embedded::kAssets[i].size,
-                                embedded::kAssets[i].mime);
-                res.set_header("Cache-Control", EndsWith(path, ".html") ? "no-cache" : "max-age=86400");
-                return true;
+            const embedded::Asset& asset = embedded::kAssets[i];
+            if (path != asset.path) {
+                continue;
             }
+            res.set_header("Vary", "Accept-Encoding");
+            if (asset.gz && AcceptsGzip(req)) {
+                res.set_content(reinterpret_cast<const char*>(asset.gz), asset.gz_size, asset.mime);
+                res.set_header("Content-Encoding", "gzip");
+            } else {
+                res.set_content(reinterpret_cast<const char*>(asset.data), asset.size, asset.mime);
+            }
+            res.set_header("Cache-Control", EndsWith(path, ".html") ? "no-cache" : "max-age=86400");
+            return true;
         }
         return false;
     }
@@ -848,6 +865,16 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
     srv.Get("/api/events", [this](const httplib::Request&, httplib::Response& res) {
         res.set_header("Cache-Control", "no-store");
         res.set_header("X-Accel-Buffering", "no");
+        // Tecto de clientes SSE: cada um segura uma thread. Um telemovel que fica pendurado (ecra
+        // bloqueado, rede a cair) nao pode acumular ligacoes ate o servidor deixar de responder.
+        static std::atomic<int> sse_clients{0};
+        if (sse_clients.fetch_add(1) >= kMaxSseClients) {
+            sse_clients.fetch_sub(1);
+            res.status = 503;
+            res.set_content("{\"error\":\"too many event streams\"}", "application/json");
+            return;
+        }
+        auto guard = std::shared_ptr<void>(nullptr, [](void*) { sse_clients.fetch_sub(1); });
         struct Client {
             uint64_t last_sent = 0;
             std::chrono::steady_clock::time_point next_allowed{};
@@ -855,7 +882,8 @@ void Core::Impl::RegisterRoutes(httplib::Server& srv) {
         auto client = std::make_shared<Client>();
         res.set_chunked_content_provider(
             "text/event-stream",
-            [this, client](size_t, httplib::DataSink& sink) {
+            [this, client, guard](size_t, httplib::DataSink& sink) {
+                (void)guard; // larga o contador quando a ligacao acabar
                 if (!sink.is_writable()) {
                     return false;
                 }
@@ -1173,6 +1201,9 @@ bool Core::Impl::Start(ToypadHost* h, const Config& cfg, std::string& err) {
     boot_id = boot;
 
     server = std::make_unique<httplib::Server>();
+    // Pool proprio e fixo: o padrao do httplib e' hardware_concurrency-1, que num portatil de 8
+    // threads deixa poucas para SSE + pedidos ao mesmo tempo.
+    server->new_task_queue = [] { return new httplib::ThreadPool(kServerThreads); };
     RegisterRoutes(*server);
 
     int port = config.port;

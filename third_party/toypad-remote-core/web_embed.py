@@ -6,9 +6,14 @@ Uso:  python web_embed.py [pasta_web] [ficheiro_saida]
 Sem argumentos usa web_src/ e web_assets.h ao lado deste script.
 Nada de ficheiros de terceiros: so o que estiver em web_src/ (index.html, catalog.js,
 manifest.json, icon.svg). As imagens (img/) e os templates (templates/) NAO entram no
-repositorio; se existirem em disco sao servidas da pasta web_dir (ver Config).
+repositorio; se existirem em disco sao servidas da pasta data_dir (ver Config).
+
+Cada ficheiro leva tambem uma variante comprimida (gzip), servida com
+Content-Encoding: gzip quando o cliente a aceita: o index.html desce de 25 KB para ~6 KB,
+o que se nota no telemovel em rede movel.
 """
 
+import gzip
 import io
 import os
 import sys
@@ -43,30 +48,52 @@ def collect(web_root):
     return items
 
 
+def emit_bytes(out, ident, data):
+    out.write("inline const unsigned char %s[] = {" % ident)
+    for start in range(0, len(data), 24):
+        chunk = data[start : start + 24]
+        out.write("\n    " + ",".join(str(b) for b in chunk) + ",")
+    out.write("\n};\n")
+
+
 def emit(items, out_path):
     out = io.StringIO()
     out.write("// GERADO por web_embed.py -- nao editar a mao.\n")
     out.write("// Site embutido no executavel (o que estiver em web_src/, sem img/ nem templates/).\n")
     out.write("#pragma once\n\nnamespace toypad_remote::embedded {\n\n")
     out.write("struct Asset {\n    const char* path;\n    const char* mime;\n    const unsigned char* data;\n")
-    out.write("    unsigned int size;\n};\n\n")
+    out.write("    unsigned int size;\n    // Variante comprimida (nullptr quando nao compensa): servida com Content-Encoding: gzip.\n")
+    out.write("    const unsigned char* gz;\n    unsigned int gz_size;\n};\n\n")
+
+    packed_info = []
     for index, (path, _mime, data) in enumerate(items):
-        ident = "kData%d" % index
-        out.write("inline const unsigned char %s[] = {" % ident)
-        for chunk_start in range(0, len(data), 24):
-            chunk = data[chunk_start : chunk_start + 24]
-            out.write("\n    " + ",".join(str(b) for b in chunk) + ",")
-        out.write("\n};\n")
+        emit_bytes(out, "kData%d" % index, data)
+        packed = gzip.compress(data, 9, mtime=0)
+        if len(packed) < len(data):
+            emit_bytes(out, "kGz%d" % index, packed)
+            packed_info.append(("kGz%d" % index, len(packed)))
+        else:
+            packed_info.append((None, 0))
+
     out.write("\ninline const Asset kAssets[] = {\n")
     for index, (path, mime, data) in enumerate(items):
-        out.write('    {"%s", "%s", kData%d, %d},\n' % (path, mime, index, len(data)))
-    out.write("};\n\ninline const unsigned int kAssetCount = %d;\n\n} // namespace toypad_remote::embedded\n" % len(items))
+        gz_ident, gz_size = packed_info[index]
+        if gz_ident:
+            out.write('    {"%s", "%s", kData%d, %d, %s, %d},\n' % (path, mime, index, len(data), gz_ident, gz_size))
+        else:
+            out.write('    {"%s", "%s", kData%d, %d, nullptr, 0},\n' % (path, mime, index, len(data)))
+    out.write("};\n\n")
+    out.write("inline const unsigned int kAssetCount = %d;\n\n} // namespace toypad_remote::embedded\n" % len(items))
+
     with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(out.getvalue())
+
     total = sum(len(d) for _p, _m, d in items)
-    print("%s: %d ficheiros, %d bytes" % (out_path, len(items), total))
-    for path, _mime, data in items:
-        print("  %-24s %7d" % (path, len(data)))
+    total_gz = sum(size for _i, size in packed_info)
+    print("%s: %d ficheiros, %d bytes (%d comprimidos)" % (out_path, len(items), total, total_gz))
+    for index, (path, _mime, data) in enumerate(items):
+        gz_ident, gz_size = packed_info[index]
+        print("  %-24s %7d%s" % (path, len(data), ("  -> %d gz" % gz_size) if gz_ident else "  (gz nao compensa)"))
 
 
 def main():
