@@ -25,7 +25,14 @@ def parse(path):
         text = fh.read()
     marker = "window.CATALOG="
     start = text.index(marker) + len(marker)
-    data = json.loads(text[start:].strip().rstrip(";"))
+    body = text[start:]
+    # o proprio gerador acrescenta linhas ao fim do catalog.js (GADGETS/EXCLUDED_IDS): corta-las
+    # antes de descodificar o JSON, senao a segunda execucao falha.
+    for tail in ("window.GADGETS=", "window.EXCLUDED_IDS="):
+        cut = body.find(tail)
+        if cut >= 0:
+            body = body[:cut]
+    data = json.loads(body.strip().rstrip(";"))
     worlds = data["worlds"]
     entries = []
     for kind, rows in (("char", data.get("chars", [])), ("vehicle", data.get("vehicles", []))):
@@ -40,12 +47,32 @@ def parse(path):
     return entries
 
 
+def parse_gadgets(path):
+    """Ids dos gadgets (ver gadgets.tsv: fonte LEGO Dimensions Wiki)."""
+    ids = []
+    if not os.path.exists(path):
+        return ids
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("	")
+            if len(parts) < 2:
+                parts = line.split()
+            try:
+                ids.append(int(parts[0], 0))
+            except ValueError:
+                continue
+    return sorted(set(ids))
+
+
 def c_string(text):
     out = text.replace("\\", "\\\\").replace('"', '\\"')
     return '"' + out + '"'
 
 
-def emit(entries, out_path):
+def emit(entries, out_path, gadgets=()):
     lines = [
         "// GERADO por gen_catalog.py a partir de web_src/catalog.js -- nao editar a mao.",
         "//",
@@ -56,6 +83,19 @@ def emit(entries, out_path):
         "#include <cstdint>",
         "",
         "namespace toypad_remote {",
+        "",
+        "// Gadgets (separados dos veiculos). Fonte: LEGO Dimensions Wiki, Category:Gadgets e as",
+        "// subcategorias de ano; ver gadgets.tsv para os ids e o nome de cada um.",
+        "inline constexpr uint16_t kGadgetIds[] = {%s};" % ", ".join("%du" % g for g in gadgets),
+        "",
+        "inline bool CatalogIsGadget(uint32_t id) {",
+        "    for (uint16_t gadget : kGadgetIds) {",
+        "        if (gadget == id) {",
+        "            return true;",
+        "        }",
+        "    }",
+        "    return false;",
+        "}",
         "",
         "struct CatalogEntry {",
         "    uint16_t id;",
@@ -113,7 +153,30 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     src = sys.argv[1] if len(sys.argv) > 1 else os.path.join(here, "web_src", "catalog.js")
     dest = sys.argv[2] if len(sys.argv) > 2 else os.path.join(here, "catalog_data.h")
-    emit(parse(src), dest)
+    gadgets = parse_gadgets(os.path.join(here, "gadgets.tsv"))
+    emit(parse(src), dest, gadgets)
+    # window.GADGETS para o web app: o chip "Gadgets" aparece quando esta lista existe
+    if gadgets:
+        marker = "window.CATALOG="
+        text = open(src, encoding="utf-8").read()
+        cut = text.find("window.GADGETS=")
+        if cut >= 0:
+            text = text[:cut].rstrip() + "\n"
+        with open(src, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+            fh.write("window.GADGETS=[%s];\n" % ",".join(str(g) for g in gadgets))
+        print("catalog.js: window.GADGETS com %d ids" % len(gadgets))
+    # Os ids que o jogo nao aceita tambem tem de sair do lado do browser: o catalog.js e' a fonte
+    # do catalogo no telemovel, e sem isto a figura continuava a ser oferecida na lista.
+    if EXCLUDED_IDS:
+        text = open(src, encoding="utf-8").read()
+        cut = text.find("window.EXCLUDED_IDS=")
+        if cut >= 0:
+            text = text[:cut].rstrip() + "\n"
+        with open(src, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+            fh.write("window.EXCLUDED_IDS=[%s];\n" % ",".join(str(i) for i in sorted(EXCLUDED_IDS)))
+        print("catalog.js: window.EXCLUDED_IDS com %d ids" % len(EXCLUDED_IDS))
 
 
 if __name__ == "__main__":

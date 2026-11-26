@@ -142,7 +142,17 @@ button.danger{color:var(--bad)}
 <script>
 "use strict";
 const $ = (s) => document.querySelector(s);
-const C = window.CATALOG || { worlds: [], chars: [], vehicles: [] };
+// ids que o jogo nao aceita (o gerador do catalogo exclui-os do lado do C++; aqui tambem)
+const EXCLUDED = new Set(window.EXCLUDED_IDS || []);
+const C = (() => {
+  const raw = window.CATALOG || { worlds: [], chars: [], vehicles: [] };
+  if (!EXCLUDED.size) return raw;
+  return {
+    worlds: raw.worlds,
+    chars: raw.chars.filter((c) => !EXCLUDED.has(c[0])),
+    vehicles: raw.vehicles.filter((v) => !EXCLUDED.has(v[0])),
+  };
+})();
 const byId = new Map();
 for (const [id, name, w, ab] of C.chars) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: false });
 for (const [id, name, w, ab] of C.vehicles) byId.set(id, { id, name, world: C.worlds[w], ab: ab || "", veh: true });
@@ -411,7 +421,7 @@ function renderList() {
   } else {
     // Filtro por tipo. Os "gadgets" nao vem marcados no catalogo: quem os quiser separar poe uma
     // lista de ids em window.GADGETS (o chip aparece sozinho quando houver algum), sem tocar aqui.
-    const gadgets = window.GADGETS || new Set();
+    const gadgets = new Set(window.GADGETS || []); // vem do catalog.js (LEGO Dimensions Wiki)
     const kinds = [
       ["all", "Todos"],
       ["char", "Personagens"],

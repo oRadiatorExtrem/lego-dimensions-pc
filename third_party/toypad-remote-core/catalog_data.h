@@ -8,6 +8,19 @@
 
 namespace toypad_remote {
 
+// Gadgets (separados dos veiculos). Fonte: LEGO Dimensions Wiki, Category:Gadgets e as
+// subcategorias de ano; ver gadgets.tsv para os ids e o nome de cada um.
+inline constexpr uint16_t kGadgetIds[] = {1029u, 1048u, 1063u, 1081u, 1082u, 1083u, 1087u, 1088u, 1089u, 1123u, 1124u, 1125u, 1158u, 1160u, 1164u, 1165u, 1166u, 1182u, 1183u, 1184u, 1188u, 1189u, 1190u, 1200u, 1201u, 1202u, 1236u, 1237u, 1248u, 1249u, 1250u};
+
+inline bool CatalogIsGadget(uint32_t id) {
+    for (uint16_t gadget : kGadgetIds) {
+        if (gadget == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
 struct CatalogEntry {
     uint16_t id;
     const char* name;
