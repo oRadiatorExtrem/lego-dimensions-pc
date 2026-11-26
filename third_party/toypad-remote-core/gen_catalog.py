@@ -14,6 +14,12 @@ import os
 import sys
 
 
+# Ids que o jogo NAO aceita (nao entram no catalogo, para a lista nao oferecer o que nao carrega).
+#   769 Supergirl Red Lantern: exclusiva de outra plataforma; o jogo nao a carrega (TODO 0c do
+#   ToyPad-Remote). O Cemu conhece 768-770 como especiais, mas 769 nao funciona no jogo.
+EXCLUDED_IDS = {769}
+
+
 def parse(path):
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
@@ -25,6 +31,8 @@ def parse(path):
     for kind, rows in (("char", data.get("chars", [])), ("vehicle", data.get("vehicles", []))):
         for row in rows:
             ident = int(row[0])
+            if ident in EXCLUDED_IDS:
+                continue
             name = str(row[1])
             world = worlds[row[2]] if 0 <= int(row[2]) < len(worlds) else ""
             entries.append((ident, name, world, kind))

@@ -99,7 +99,6 @@ inline constexpr CatalogEntry kCatalog[] = {
     {81u, "World 18 (unreleased)", "18", false},
     {82u, "World 19 (unreleased)", "19", false},
     {83u, "World 20 (unreleased)", "20", false},
-    {769u, "Supergirl Red Lantern", "DC Comics", false},
     {1000u, "Police Car", "The LEGO Movie", true},
     {1001u, "Aerial Squad Car", "The LEGO Movie", true},
     {1002u, "Missile Striker", "The LEGO Movie", true},
