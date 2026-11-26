@@ -18,6 +18,7 @@ assets/launcher/
 assets/shaders_spv/pairs/*
 assets/shaders_spv/pair_snapshots.txt
 assets/shaders_spv/ui_shader_pairs.tsv
+assets/shaders_spv/pipeline_states.txt
 !assets/**/.manter
 *.DAT
 *.DAT2
