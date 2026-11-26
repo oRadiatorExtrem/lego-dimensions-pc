@@ -1281,6 +1281,7 @@ int main(int argc, char** argv) {
     int toypad_remote_port = 8090;
     std::string toypad_remote_pin;
     std::filesystem::path toypad_remote_figures;
+    std::filesystem::path toypad_remote_web; // pasta do site em disco (desenvolvimento)
     bool real_toypad = true; // Fase 61: --no-real-toypad ignora o portal fisico
     std::filesystem::path portal_file = root / "assets" / "portal.json";
     std::filesystem::path radar_log = root / "build" / "radar_arquivos.log";
@@ -1608,6 +1609,8 @@ int main(int argc, char** argv) {
             toypad_remote_pin = argv[++i];
         } else if (!std::strcmp(argv[i], "--toypad-remote-figures") && i + 1 < argc) {
             toypad_remote_figures = std::filesystem::u8path(argv[++i]);
+        } else if (!std::strcmp(argv[i], "--toypad-remote-web") && i + 1 < argc) {
+            toypad_remote_web = std::filesystem::u8path(argv[++i]); // site em disco (ganha ao embutido)
         } else if (!std::strcmp(argv[i], "--selftest")) {
             selftest = true;
         } else {
@@ -1752,7 +1755,7 @@ int main(int argc, char** argv) {
             const std::filesystem::path figures =
                 !toypad_remote_figures.empty() ? toypad_remote_figures : root / "assets" / "toypad_remote" / "figures";
             std::string remote_err;
-            if (hle::toypad_remote::Start(toypad_remote_port, toypad_remote_pin, figures, &remote_err)) {
+            if (hle::toypad_remote::Start(toypad_remote_port, toypad_remote_pin, figures, &remote_err, toypad_remote_web)) {
                 std::printf("toypad-rem : %s  (figures: %s)\n", hle::toypad_remote::Url().c_str(),
                             hle::fs::PathText(figures).c_str());
                 std::printf("             abre esse endereco no telemovel; POST sem o cabecalho X-TPR e recusado\n");

@@ -270,7 +270,8 @@ void OnPortalChanged() {
 
 } // namespace
 
-bool Start(int port, const std::string& pin, const std::filesystem::path& figures_dir, std::string* err) {
+bool Start(int port, const std::string& pin, const std::filesystem::path& figures_dir, std::string* err,
+           const std::filesystem::path& web_dir) {
     if (g_started) {
         return true;
     }
@@ -289,6 +290,11 @@ bool Start(int port, const std::string& pin, const std::filesystem::path& figure
     // icones (/img/<id>.png) e templates do utilizador ficam ao lado das figuras: nada disto e'
     // distribuido com o port. Sem a pasta, o web app mostra o marcador com o id.
     config.data_dir = figures_dir.parent_path().string();
+    // pasta do site em disco (desenvolvimento): ganha ao site embutido, para se poder corrigir o
+    // web app sem recompilar o jogo. Vazia = usa o embutido.
+    if (!web_dir.empty()) {
+        config.web_dir = NarrowPath(web_dir);
+    }
     std::string reason;
     if (!::toypad_remote::Core::Instance().Start(g_host, config, reason)) {
         if (err) {

@@ -161,8 +161,23 @@ let state = null, figures = [], target = null, moving = null, tab = "mine", worl
 let autoSheetDone = false; // a biblioteca abre sozinha uma vez, quando o pad esta vazio
 
 // ---- api
+// Todo POST leva o cabecalho proprio: e' o que impede um site externo de mexer no portal
+// (sem ele, o servidor responde 403 "falta o cabecalho X-TPR").
 async function api(path, params) {
-  const r = await fetch(path + "?" + new URLSearchParams(params), { method: "POST" });
+  const send = (extra) =>
+    fetch(path + "?" + new URLSearchParams({ ...params, ...extra }), {
+      method: "POST",
+      headers: { "X-TPR": "1" },
+    });
+  let r = await send({});
+  if (r.status === 401) {
+    // servidor com PIN: pergunta uma vez e guarda neste telemovel
+    const pin = localStorage.getItem("tpr_pin") || prompt("PIN do Toy Pad Remote:");
+    if (pin) {
+      localStorage.setItem("tpr_pin", pin);
+      r = await send({ pin });
+    }
+  }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || "erro " + r.status);
   return j;

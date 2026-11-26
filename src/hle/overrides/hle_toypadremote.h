@@ -12,7 +12,8 @@ namespace hle::toypad_remote {
 
 // Arranca o servidor. `figures_dir` e a pasta dos .bin (criada se faltar). `pin` vazio = sem PIN.
 // Devolve false e o motivo em `err` se a porta estiver ocupada.
-bool Start(int port, const std::string& pin, const std::filesystem::path& figures_dir, std::string* err);
+bool Start(int port, const std::string& pin, const std::filesystem::path& figures_dir, std::string* err,
+               const std::filesystem::path& web_dir = {});
 
 void Stop();
 bool Running();
